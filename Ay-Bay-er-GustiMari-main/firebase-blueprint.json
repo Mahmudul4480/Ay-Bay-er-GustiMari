@@ -1,0 +1,91 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User settings and profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "language": { "type": "string", "enum": ["en", "bn"] },
+        "budgetLimit": { "type": "number" },
+        "familyMembers": { "type": "array", "items": { "type": "string" } },
+        "incomeCategories": { "type": "array", "items": { "type": "string" } },
+        "expenseCategories": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Income or expense record",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["income", "expense"] },
+        "category": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "note": { "type": "string" },
+        "familyMember": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "isFixed": { "type": "boolean" },
+        "debtId": { "type": "string" }
+      },
+      "required": ["userId", "amount", "type", "category", "date"]
+    },
+    "Debt": {
+      "title": "Debt",
+      "description": "Lent or borrowed money record",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["lent", "borrowed"] },
+        "personName": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "note": { "type": "string" },
+        "status": { "type": "string", "enum": ["unpaid", "paid"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "amount", "type", "personName", "dueDate", "status"]
+    },
+    "FixedFinance": {
+      "title": "Fixed Finance",
+      "description": "Recurring income or expense",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["income", "expense"] },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "dayOfMonth": { "type": "integer" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "amount", "type", "category", "dayOfMonth"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile documents"
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Transaction records"
+    },
+    "/debts/{debtId}": {
+      "schema": "Debt",
+      "description": "Debt records"
+    },
+    "/fixedFinances/{fixedId}": {
+      "schema": "FixedFinance",
+      "description": "Fixed finance records"
+    }
+  }
+}
