@@ -1,8 +1,8 @@
 import React from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LocalizationProvider, useLocalization } from './contexts/LocalizationContext';
-import { loginWithGoogle, logout } from './firebaseConfig';
-import { LogIn, LogOut, LayoutDashboard, CreditCard, Settings, Plus, Menu, X, Globe, Sun, Moon } from 'lucide-react';
+import { loginWithGoogle, logout, isInAppBrowser } from './firebaseConfig';
+import { LogIn, LogOut, LayoutDashboard, CreditCard, Settings, Plus, Menu, X, Globe, Sun, Moon, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 import Dashboard from './components/Dashboard';
@@ -47,22 +47,24 @@ const AppContent: React.FC = () => {
   }
 
   if (!user) {
+    const isAppBrowser = isInAppBrowser();
+    
     return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center bg-gradient-to-br from-gray-100 via-gray-200 to-gray-300 p-4 transition-colors overflow-hidden relative">
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-gradient-to-br from-indigo-900 via-purple-800 to-slate-900 p-4 transition-colors overflow-hidden relative">
         {/* Background decorative elements */}
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-white/40 rounded-full blur-[120px] animate-pulse" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-gray-400/20 rounded-full blur-[120px] animate-pulse" />
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-500/20 rounded-full blur-[120px] animate-pulse" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-500/20 rounded-full blur-[120px] animate-pulse" />
         
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white/30 backdrop-blur-md p-10 rounded-[2.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-white/50 max-w-md w-full text-center transition-all flex flex-col items-center justify-center gap-8"
+          className="bg-white/10 backdrop-blur-xl p-10 rounded-[2.5rem] shadow-2xl border border-white/20 max-w-md w-full text-center transition-all flex flex-col items-center justify-center gap-8"
         >
           <div className="logo-container inline-block mx-auto">
             <motion.img
               src="https://i.postimg.cc/K8yGqVdy/logo-png.png"
               alt="Logo"
-              className="w-64 h-auto object-contain cursor-pointer drop-shadow-lg"
+              className="w-64 h-auto object-contain cursor-pointer drop-shadow-2xl brightness-110"
               animate={{
                 y: [0, -5, 0],
               }}
@@ -83,13 +85,30 @@ const AppContent: React.FC = () => {
           </div>
           
           <div className="space-y-2">
-            <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">Ay Bay Er GustiMari</h1>
-            <p className="text-gray-500 font-medium text-sm">Personal Finance & Debt Manager</p>
+            <h1 className="text-3xl font-extrabold text-white tracking-tight drop-shadow-sm">
+              {t('appName')}
+            </h1>
+            <p className="text-slate-300 font-medium text-sm">Personal Finance & Debt Manager</p>
           </div>
+
+          {isAppBrowser && (
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-amber-500/20 border border-amber-500/30 p-4 rounded-2xl flex items-start gap-3 text-left"
+            >
+              <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-100 leading-relaxed">
+                {language === 'bn' 
+                  ? 'আপনি একটি ইন-অ্যাপ ব্রাউজার ব্যবহার করছেন। লগইন করতে সমস্যা হলে, অনুগ্রহ করে এই লিংকটি Chrome বা Safari-তে ওপেন করুন।' 
+                  : 'You are using an in-app browser. If login fails, please open this link in Chrome or Safari for a better experience.'}
+              </p>
+            </motion.div>
+          )}
 
           <button
             onClick={loginWithGoogle}
-            className="w-full flex items-center justify-center gap-3 bg-white border border-gray-200 py-4 px-6 rounded-2xl font-bold text-gray-800 hover:bg-gray-50 transition-all shadow-md hover:shadow-lg active:scale-95 group"
+            className="w-full flex items-center justify-center gap-3 bg-white/90 backdrop-blur-sm border border-white/20 py-4 px-6 rounded-2xl font-bold text-slate-900 hover:bg-white transition-all shadow-md hover:shadow-lg active:scale-95 group"
           >
             <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-6 h-6 group-hover:scale-110 transition-transform" />
             {t('loginWithGoogle')}
@@ -99,10 +118,10 @@ const AppContent: React.FC = () => {
             <button 
               onClick={() => setLanguage('en')} 
               className={cn(
-                "text-sm font-bold px-3 py-1 rounded-lg transition-all", 
+                "text-sm font-bold px-4 py-2 rounded-xl transition-all", 
                 language === 'en' 
-                  ? "bg-gray-200 text-gray-900" 
-                  : "text-gray-400 hover:text-gray-600"
+                  ? "bg-white/20 text-white shadow-lg border border-white/30" 
+                  : "text-slate-400 hover:text-slate-200"
               )}
             >
               English
@@ -110,10 +129,10 @@ const AppContent: React.FC = () => {
             <button 
               onClick={() => setLanguage('bn')} 
               className={cn(
-                "text-sm font-bold px-3 py-1 rounded-lg transition-all", 
+                "text-sm font-bold px-4 py-2 rounded-xl transition-all", 
                 language === 'bn' 
-                  ? "bg-gray-200 text-gray-900" 
-                  : "text-gray-400 hover:text-gray-600"
+                  ? "bg-white/20 text-white shadow-lg border border-white/30" 
+                  : "text-slate-400 hover:text-slate-200"
               )}
             >
               বাংলা

@@ -18,7 +18,7 @@ interface DashboardProps {
 const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
   const { transactions = [], debts = [] } = useTransactions();
   const { t, language } = useLocalization();
-  const { user, userProfile } = useAuth();
+  const { userProfile } = useAuth();
   const [modalType, setModalType] = React.useState<'income' | 'expense' | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = React.useState<string | null>(null);
 
@@ -45,9 +45,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
   const netDebt = totalBorrowed - totalLent;
 
   const deleteTransaction = async (id: string) => {
-    if (!user) return;
-    const tx = transactions.find((t) => t.id === id);
-    if (!tx || tx.userId !== user.uid) return;
     try {
       await deleteDoc(doc(db, 'transactions', id));
       setDeleteConfirmId(null);

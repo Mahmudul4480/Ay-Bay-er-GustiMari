@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocalization } from '../contexts/LocalizationContext';
 import { db } from '../firebaseConfig';
-import { doc, updateDoc, collection, addDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { doc, updateDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { motion } from 'motion/react';
 import { X, Save } from 'lucide-react';
@@ -33,7 +33,15 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, initialType 
     const finalCategory = isAddingCategory ? newCategory : category;
     const finalMember = isAddingMember ? newMember : familyMember;
 
-    if (!user || !userProfile || !amount || !finalCategory) return;
+    if (!user || !amount || !finalCategory) {
+      alert(t('fillAllFields'));
+      return;
+    }
+
+    if (!userProfile) {
+      alert(t('profileLoading'));
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -72,7 +80,7 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, initialType 
           amount: parseFloat(amount),
           type,
           category: savedCategory,
-          date: Timestamp.fromDate(new Date(date)),
+          date: new Date(date),
           note,
           familyMember: savedMember,
           createdAt: serverTimestamp(),

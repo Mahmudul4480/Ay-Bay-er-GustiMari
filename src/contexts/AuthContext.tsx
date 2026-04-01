@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, onAuthStateChanged } from 'firebase/auth';
 import { auth, db } from '../firebaseConfig';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 
 interface AuthContextType {
@@ -19,14 +19,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    let unsubscribeProfile: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      // Clean up previous profile listener if it exists
+      if (unsubscribeProfile) {
+        unsubscribeProfile();
+        unsubscribeProfile = null;
+      }
+
       setUser(user);
       if (user) {
         const userDocRef = doc(db, 'users', user.uid);
-        try {
-          const userDoc = await getDoc(userDocRef);
-          
-          if (!userDoc.exists()) {
+        unsubscribeProfile = onSnapshot(userDocRef, (docSnap) => {
+          if (docSnap.exists()) {
+            setUserProfile(docSnap.data());
+          } else {
+            // Create profile if it doesn't exist
             const newProfile = {
               uid: user.uid,
               displayName: user.displayName,
@@ -38,23 +47,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               incomeCategories: ['Salary', 'Business', 'Gift', 'Investment', 'Other'],
               expenseCategories: ['Food', 'Rent', 'Utilities', 'Transport', 'Entertainment', 'Health', 'Education', 'Shopping', 'Other'],
               createdAt: serverTimestamp(),
-              role: 'user'
+              role: user.email === 'chotan4480@gmail.com' ? 'admin' : 'user'
             };
-            await setDoc(userDocRef, newProfile);
-            setUserProfile(newProfile);
-          } else {
-            setUserProfile(userDoc.data());
+            setDoc(userDocRef, newProfile).catch(err => {
+              handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}`);
+            });
           }
-        } catch (error) {
+          setLoading(false);
+        }, (error) => {
           handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
-        }
+          setLoading(false);
+        });
       } else {
         setUserProfile(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
-    return unsubscribe;
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeProfile) unsubscribeProfile();
+    };
   }, []);
 
   return (

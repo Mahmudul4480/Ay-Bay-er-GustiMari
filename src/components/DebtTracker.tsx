@@ -3,7 +3,7 @@ import { useTransactions } from '../hooks/useTransactions';
 import { useLocalization } from '../contexts/LocalizationContext';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebaseConfig';
-import { collection, addDoc, updateDoc, doc, serverTimestamp, deleteDoc, query, where, getDocs, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc, serverTimestamp, deleteDoc, query, where, getDocs } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -59,12 +59,11 @@ const DebtTracker: React.FC = () => {
           amount: parseFloat(formData.amount),
           type: formData.type === 'lent' ? 'expense' : 'income',
           category: formData.type === 'lent' ? 'Debt Given' : 'Debt Taken',
-          date: Timestamp.now(),
+          date: serverTimestamp(),
           note: `${formData.type === 'lent' ? 'Lent to' : 'Borrowed from'} ${formData.personName}`,
           familyMember: 'Self',
           isFixed: false,
-          debtId: debtRef.id,
-          createdAt: serverTimestamp(),
+          debtId: debtRef.id // Link to debt for future reference if needed
         });
       } catch (error) {
         handleFirestoreError(error, OperationType.CREATE, 'transactions');
@@ -121,12 +120,11 @@ const DebtTracker: React.FC = () => {
           amount: debt.amount,
           type: transactionType,
           category: newStatus === 'paid' ? 'Debt Settlement' : 'Debt Reversal',
-          date: Timestamp.now(),
+          date: serverTimestamp(),
           note: `${newStatus === 'paid' ? 'Settled' : 'Reversed'} debt with ${debt.personName}`,
           familyMember: 'Self',
           isFixed: false,
-          debtId: debt.id,
-          createdAt: serverTimestamp(),
+          debtId: debt.id
         });
       } catch (error) {
         handleFirestoreError(error, OperationType.CREATE, 'transactions');

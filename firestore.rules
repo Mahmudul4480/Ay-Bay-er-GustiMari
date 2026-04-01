@@ -1,0 +1,182 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (matches request.auth.uid)
+    // Fields:
+    //   - uid: string (required)
+    //   - displayName: string (optional)
+    //   - email: string (required)
+    //   - photoURL: string (optional)
+    //   - language: string (en/bn)
+    //   - budgetLimit: number
+    //   - familyMembers: list
+    //   - incomeCategories: list
+    //   - expenseCategories: list
+    //   - createdAt: timestamp
+    //   - role: string (admin/user)
+    //
+    // Collection: transactions
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required, matches request.auth.uid)
+    //   - amount: number (required, positive)
+    //   - type: string (income/expense)
+    //   - category: string (required)
+    //   - date: timestamp (required)
+    //   - note: string (optional)
+    //   - familyMember: string (optional)
+    //   - createdAt: timestamp
+    //   - isFixed: bool (optional)
+    //   - debtId: string (optional)
+    //
+    // Collection: debts
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required, matches request.auth.uid)
+    //   - amount: number (required, positive)
+    //   - type: string (lent/borrowed)
+    //   - personName: string (required)
+    //   - phoneNumber: string (optional)
+    //   - dueDate: timestamp (required)
+    //   - note: string (optional)
+    //   - status: string (unpaid/paid)
+    //   - createdAt: timestamp
+    //
+    // Collection: fixedFinances
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required, matches request.auth.uid)
+    //   - amount: number (required, positive)
+    //   - type: string (income/expense)
+    //   - category: string (required)
+    //   - description: string (optional)
+    //   - dayOfMonth: number (1-31)
+    //   - updatedAt: timestamp
+    //   - createdAt: timestamp
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (
+          (request.auth.token.email == "chotan4480@gmail.com" && request.auth.token.email_verified == true) ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+        );
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // Validation Helpers
+    function isValidString(val, maxLen) {
+      return val is string && val.size() > 0 && val.size() <= maxLen;
+    }
+
+    function isValidOptionalString(data, field, maxLen) {
+      return !(field in data) || (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function isValidNumber(val, min, max) {
+      return val is number && val >= min && val <= max;
+    }
+
+    // Domain Validators
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role']) &&
+             data.uid == request.auth.uid &&
+             data.email is string &&
+             data.role in ['admin', 'user'];
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll(['userId', 'amount', 'type', 'category', 'date']) &&
+             data.userId == request.auth.uid &&
+             data.amount is number && data.amount >= 0 &&
+             data.type in ['income', 'expense'] &&
+             isValidString(data.category, 50) &&
+             isValidOptionalString(data, 'note', 500) &&
+             isValidOptionalString(data, 'familyMember', 50);
+    }
+
+    function isValidDebt(data) {
+      return data.keys().hasAll(['userId', 'amount', 'type', 'personName', 'dueDate', 'status']) &&
+             data.userId == request.auth.uid &&
+             data.amount is number && data.amount >= 0 &&
+             data.type in ['lent', 'borrowed'] &&
+             isValidString(data.personName, 100) &&
+             data.status in ['unpaid', 'paid'] &&
+             isValidOptionalString(data, 'note', 500);
+    }
+
+    function isValidFixedFinance(data) {
+      return data.keys().hasAll(['userId', 'amount', 'type', 'category', 'dayOfMonth']) &&
+             data.userId == request.auth.uid &&
+             data.amount is number && data.amount >= 0 &&
+             data.type in ['income', 'expense'] &&
+             isValidString(data.category, 50) &&
+             data.dayOfMonth is int && data.dayOfMonth >= 1 && data.dayOfMonth <= 31;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // Allow user to read their own profile, or admin to read any
+      allow read: if isAuthenticated() && (request.auth.uid == userId || (request.auth.token.email == "chotan4480@gmail.com" && request.auth.token.email_verified == true));
+      
+      // Allow user to create their own profile
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      
+      // Allow user to update their own profile (preventing role escalation unless admin)
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    (request.resource.data.role == resource.data.role || (request.auth.token.email == "chotan4480@gmail.com" && request.auth.token.email_verified == true));
+      
+      allow delete: if (request.auth.token.email == "chotan4480@gmail.com" && request.auth.token.email_verified == true);
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidTransaction(request.resource.data);
+      allow update: if isAuthenticated() && (isDocOwner() || isAdmin()) && isValidTransaction(request.resource.data);
+      allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
+    }
+
+    match /debts/{debtId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidDebt(request.resource.data);
+      allow update: if isAuthenticated() && (isDocOwner() || isAdmin()) && isValidDebt(request.resource.data);
+      allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
+    }
+
+    match /fixedFinances/{fixedId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidFixedFinance(request.resource.data);
+      allow update: if isAuthenticated() && (isDocOwner() || isAdmin()) && isValidFixedFinance(request.resource.data);
+      allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
+    }
+  }
+}

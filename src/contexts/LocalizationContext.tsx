@@ -13,7 +13,7 @@ interface Translations {
 }
 
 export const translations: Translations = {
-  appName: { en: 'Ay Bay Hisaber GustiMari', bn: 'আয় ব্যায় হিসাবের গুস্টিমারি' },
+  appName: { en: 'Ay Bay Er GustiMari', bn: 'আয় ব্যায়ের গুষ্টিমারি' },
   dashboard: { en: 'Dashboard', bn: 'ড্যাশবোর্ড' },
   totalBalance: { en: 'Total Balance', bn: 'মোট ব্যালেন্স' },
   monthlyIncome: { en: 'Monthly Income', bn: 'মাসিক আয়' },
@@ -61,6 +61,12 @@ export const translations: Translations = {
   confirmDelete: { en: 'Are you sure you want to delete this?', bn: 'আপনি কি নিশ্চিত যে আপনি এটি মুছে ফেলতে চান?' },
   delete: { en: 'Delete', bn: 'মুছে ফেলুন' },
   action: { en: 'Action', bn: 'অ্যাকশন' },
+  fillAllFields: { en: 'Please fill in all required fields', bn: 'অনুগ্রহ করে সব প্রয়োজনীয় তথ্য দিন' },
+  profileLoading: { en: 'User profile is still loading. Please try again in a moment.', bn: 'ব্যবহারকারীর প্রোফাইল লোড হচ্ছে। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।' },
+  categoryExists: { en: 'This category already exists!', bn: 'এই বিভাগটি ইতিমধ্যে বিদ্যমান!' },
+  errorAddingCategory: { en: 'Error adding category. Please try again.', bn: 'বিভাগ যোগ করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।' },
+  edit: { en: 'Edit', bn: 'সম্পাদনা' },
+  add: { en: 'Add', bn: 'যোগ করুন' },
 };
 
 interface LocalizationContextType {

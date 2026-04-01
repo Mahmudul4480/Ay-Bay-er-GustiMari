@@ -47,15 +47,7 @@ export const useTransactions = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user) {
-      setTransactions([]);
-      setDebts([]);
-      setFixedFinances([]);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
+    if (!user) return;
 
     const qTransactions = query(
       collection(db, 'transactions'),
@@ -74,36 +66,44 @@ export const useTransactions = () => {
       where('userId', '==', user.uid)
     );
 
-    let pending = 3;
-    const markInitialLoadOnce = (seen: { current: boolean }) => {
-      if (seen.current) return;
-      seen.current = true;
-      pending -= 1;
-      if (pending <= 0) setLoading(false);
+    let transactionsLoaded = false;
+    let debtsLoaded = false;
+    let fixedLoaded = false;
+
+    const checkLoading = () => {
+      if (transactionsLoaded && debtsLoaded && fixedLoaded) {
+        setLoading(false);
+      }
     };
-    const txSeen = { current: false };
-    const debtsSeen = { current: false };
-    const fixedSeen = { current: false };
 
     const unsubscribeTransactions = onSnapshot(qTransactions, (snapshot) => {
       setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transaction)));
-      markInitialLoadOnce(txSeen);
+      transactionsLoaded = true;
+      checkLoading();
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'transactions');
+      transactionsLoaded = true;
+      checkLoading();
     });
 
     const unsubscribeDebts = onSnapshot(qDebts, (snapshot) => {
       setDebts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Debt)));
-      markInitialLoadOnce(debtsSeen);
+      debtsLoaded = true;
+      checkLoading();
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'debts');
+      debtsLoaded = true;
+      checkLoading();
     });
 
     const unsubscribeFixed = onSnapshot(qFixed, (snapshot) => {
       setFixedFinances(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FixedFinance)));
-      markInitialLoadOnce(fixedSeen);
+      fixedLoaded = true;
+      checkLoading();
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'fixedFinances');
+      fixedLoaded = true;
+      checkLoading();
     });
 
     return () => {

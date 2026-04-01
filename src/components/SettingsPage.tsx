@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useLocalization } from '../contexts/LocalizationContext';
 import { useTransactions } from '../hooks/useTransactions';
 import { db } from '../firebaseConfig';
-import { doc, updateDoc, collection, addDoc, serverTimestamp, deleteDoc, Timestamp } from 'firebase/firestore';
+import { doc, updateDoc, collection, addDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { motion } from 'motion/react';
 import { Download, Upload, FileText, Save, Globe, Shield, Bell, AlertCircle, User, X, Plus } from 'lucide-react';
@@ -50,16 +50,28 @@ const SettingsPage: React.FC = () => {
   const handleAddCategory = async (type: 'income' | 'expense') => {
     const input = type === 'income' ? newIncomeCategoryInput : newExpenseCategoryInput;
     const field = type === 'income' ? 'incomeCategories' : 'expenseCategories';
-    const currentCategories = userProfile?.[field] || [];
-    if (input && !currentCategories.includes(input)) {
-      const updated = [...currentCategories, input];
-      try {
-        await updateDoc(doc(db, 'users', user!.uid), { [field]: updated });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `users/${user!.uid}`);
+    
+    if (!user || !userProfile) {
+      setAlertModal({ title: t('error'), message: t('profileLoading') });
+      return;
+    }
+
+    if (input && input.trim()) {
+      const trimmedInput = input.trim();
+      const currentCategories = userProfile[field] || [];
+      
+      if (!currentCategories.map((c: string) => c.toLowerCase()).includes(trimmedInput.toLowerCase())) {
+        const updated = [...currentCategories, trimmedInput];
+        try {
+          await updateDoc(doc(db, 'users', user.uid), { [field]: updated });
+          if (type === 'income') setNewIncomeCategoryInput('');
+          else setNewExpenseCategoryInput('');
+        } catch (error) {
+          handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+        }
+      } else {
+        setAlertModal({ title: t('info'), message: t('categoryExists') });
       }
-      if (type === 'income') setNewIncomeCategoryInput('');
-      else setNewExpenseCategoryInput('');
     }
   };
 
@@ -172,59 +184,26 @@ const SettingsPage: React.FC = () => {
           title: t('restoreData'),
           message: 'This will import all records from the file. Continue?',
           onConfirm: async () => {
-            // Import transactions (explicit fields; never write another user's id onto a new doc)
-            for (const raw of data.transactions || []) {
-              const tx = raw as Record<string, unknown>;
-              const { id: _txId, userId: _oldUid, ...rest } = tx;
-              const d = rest.date as { seconds?: number } | Timestamp | Date | undefined;
-              let dateField: Timestamp;
-              if (d && typeof (d as Timestamp).toDate === 'function') {
-                dateField = Timestamp.fromDate((d as Timestamp).toDate());
-              } else if (d && typeof d === 'object' && 'seconds' in d && typeof d.seconds === 'number') {
-                dateField = Timestamp.fromMillis(d.seconds * 1000);
-              } else {
-                dateField = Timestamp.fromDate(d instanceof Date ? d : new Date());
-              }
+            // Import transactions
+            for (const tx of data.transactions || []) {
               try {
                 await addDoc(collection(db, 'transactions'), {
+                  ...tx,
                   userId: user.uid,
-                  amount: Number(rest.amount),
-                  type: rest.type as 'income' | 'expense',
-                  category: String(rest.category ?? ''),
-                  date: dateField,
-                  note: String(rest.note ?? ''),
-                  familyMember: String(rest.familyMember ?? 'Self'),
+                  date: tx.date?.seconds ? new Date(tx.date.seconds * 1000) : new Date(),
                   createdAt: serverTimestamp(),
-                  ...(rest.debtId != null && rest.debtId !== '' ? { debtId: String(rest.debtId) } : {}),
-                  ...(typeof rest.isFixed === 'boolean' ? { isFixed: rest.isFixed } : {}),
                 });
               } catch (error) {
                 handleFirestoreError(error, OperationType.CREATE, 'transactions');
               }
             }
             // Import debts
-            for (const raw of data.debts || []) {
-              const debt = raw as Record<string, unknown>;
-              const { id: _dId, userId: _oldUid, ...rest } = debt;
-              const dd = rest.dueDate as { seconds?: number } | Timestamp | Date | undefined;
-              let dueField: Timestamp;
-              if (dd && typeof (dd as Timestamp).toDate === 'function') {
-                dueField = Timestamp.fromDate((dd as Timestamp).toDate());
-              } else if (dd && typeof dd === 'object' && 'seconds' in dd && typeof dd.seconds === 'number') {
-                dueField = Timestamp.fromMillis(dd.seconds * 1000);
-              } else {
-                dueField = Timestamp.fromDate(dd instanceof Date ? dd : new Date());
-              }
+            for (const debt of data.debts || []) {
               try {
                 await addDoc(collection(db, 'debts'), {
+                  ...debt,
                   userId: user.uid,
-                  personName: String(rest.personName ?? ''),
-                  amount: Number(rest.amount),
-                  type: rest.type as 'lent' | 'borrowed',
-                  description: String(rest.description ?? ''),
-                  dueDate: dueField,
-                  status: (rest.status === 'paid' || rest.status === 'unpaid' ? rest.status : 'unpaid') as 'paid' | 'unpaid',
-                  phoneNumber: String(rest.phoneNumber ?? ''),
+                  dueDate: debt.dueDate?.seconds ? new Date(debt.dueDate.seconds * 1000) : new Date(),
                   createdAt: serverTimestamp(),
                 });
               } catch (error) {
@@ -275,18 +254,18 @@ const SettingsPage: React.FC = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 space-y-6"
+          className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 space-y-6"
         >
           <div className="flex items-center gap-3 mb-4">
             <Globe className="w-6 h-6 text-blue-600" />
-            <h3 className="text-xl font-bold text-slate-800">{t('language')}</h3>
+            <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">{t('language')}</h3>
           </div>
-          <div className="flex p-1 bg-slate-100 rounded-2xl">
+          <div className="flex p-1 bg-slate-100 dark:bg-slate-700 rounded-2xl">
             <button
               onClick={() => setLanguage('en')}
               className={cn(
                 "flex-1 py-3 rounded-xl font-semibold transition-all",
-                language === 'en' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500"
+                language === 'en' ? "bg-white dark:bg-slate-600 text-blue-600 dark:text-blue-400 shadow-sm" : "text-slate-500 dark:text-slate-400"
               )}
             >
               English
@@ -295,7 +274,7 @@ const SettingsPage: React.FC = () => {
               onClick={() => setLanguage('bn')}
               className={cn(
                 "flex-1 py-3 rounded-xl font-semibold transition-all",
-                language === 'bn' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500"
+                language === 'bn' ? "bg-white dark:bg-slate-600 text-blue-600 dark:text-blue-400 shadow-sm" : "text-slate-500 dark:text-slate-400"
               )}
             >
               বাংলা
@@ -307,11 +286,11 @@ const SettingsPage: React.FC = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 space-y-6"
+          className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 space-y-6"
         >
           <div className="flex items-center gap-3 mb-4">
             <AlertCircle className="w-6 h-6 text-orange-600" />
-            <h3 className="text-xl font-bold text-slate-800">{t('budgetLimit')}</h3>
+            <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">{t('budgetLimit')}</h3>
           </div>
           <div className="space-y-4">
             <input
@@ -319,7 +298,7 @@ const SettingsPage: React.FC = () => {
               value={budgetLimit}
               onChange={(e) => setBudgetLimit(parseFloat(e.target.value))}
               placeholder="Enter monthly limit"
-              className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100"
             />
             <button
               onClick={handleSaveBudget}
@@ -336,21 +315,21 @@ const SettingsPage: React.FC = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 space-y-6"
+          className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 space-y-6"
         >
           <div className="flex items-center gap-3 mb-4">
             <Shield className="w-6 h-6 text-green-600" />
-            <h3 className="text-xl font-bold text-slate-800">{t('backupData')}</h3>
+            <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">{t('backupData')}</h3>
           </div>
           <div className="grid grid-cols-1 gap-4">
             <button
               onClick={exportData}
-              className="w-full py-4 px-6 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-slate-700 hover:bg-slate-100 transition-all flex items-center justify-center gap-3"
+              className="w-full py-4 px-6 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all flex items-center justify-center gap-3"
             >
               <Download className="w-5 h-5 text-blue-600" />
               {t('backupData')} (JSON)
             </button>
-            <label className="w-full py-4 px-6 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-slate-700 hover:bg-slate-100 transition-all flex items-center justify-center gap-3 cursor-pointer">
+            <label className="w-full py-4 px-6 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all flex items-center justify-center gap-3 cursor-pointer">
               <Upload className="w-5 h-5 text-green-600" />
               {t('restoreData')}
               <input type="file" accept=".json" onChange={importData} className="hidden" />
@@ -362,15 +341,15 @@ const SettingsPage: React.FC = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 space-y-6"
+          className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 space-y-6"
         >
           <div className="flex items-center gap-3 mb-4">
             <FileText className="w-6 h-6 text-purple-600" />
-            <h3 className="text-xl font-bold text-slate-800">Reports</h3>
+            <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">Reports</h3>
           </div>
           <button
             onClick={generatePDF}
-            className="w-full py-4 px-6 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-slate-700 hover:bg-slate-100 transition-all flex items-center justify-center gap-3"
+            className="w-full py-4 px-6 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all flex items-center justify-center gap-3"
           >
             <FileText className="w-5 h-5 text-red-600" />
             Export Monthly Report (PDF)
@@ -381,15 +360,15 @@ const SettingsPage: React.FC = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 space-y-6 md:col-span-2"
+          className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 space-y-6 md:col-span-2"
         >
           <div className="flex items-center gap-3 mb-4">
             <User className="w-6 h-6 text-indigo-600" />
-            <h3 className="text-xl font-bold text-slate-800">{t('familyMembers')}</h3>
+            <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">{t('familyMembers')}</h3>
           </div>
           <div className="flex flex-wrap gap-2">
             {userProfile?.familyMembers?.map((member: string) => (
-              <div key={member} className="flex items-center gap-2 bg-indigo-50 text-indigo-700 px-4 py-2 rounded-xl font-medium">
+              <div key={member} className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-4 py-2 rounded-xl font-medium">
                 {member}
                 {member !== 'Self' && (
                   <button 
@@ -416,7 +395,7 @@ const SettingsPage: React.FC = () => {
               placeholder={t('addMember')}
               value={newMemberInput}
               onChange={(e) => setNewMemberInput(e.target.value)}
-              className="flex-1 p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none"
+              className="flex-1 p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleAddMember();
               }}
@@ -434,26 +413,26 @@ const SettingsPage: React.FC = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 space-y-8 md:col-span-2"
+          className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 space-y-8 md:col-span-2"
         >
           <div className="flex items-center gap-3 mb-4">
             <Globe className="w-6 h-6 text-teal-600" />
-            <h3 className="text-xl font-bold text-slate-800">{t('manageCategories')}</h3>
+            <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">{t('manageCategories')}</h3>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="space-y-4">
-              <h4 className="font-bold text-slate-700 flex items-center gap-2">
+              <h4 className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
                 <span className="w-2 h-2 bg-green-500 rounded-full" />
                 {t('incomeCategories')}
               </h4>
               <div className="flex flex-wrap gap-2">
                 {userProfile?.incomeCategories?.map((cat: string) => (
-                  <div key={cat} className="flex items-center gap-2 bg-green-50 text-green-700 px-4 py-2 rounded-xl font-medium">
+                  <div key={cat} className="flex items-center gap-2 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-4 py-2 rounded-xl font-medium">
                     {editingCategory?.type === 'income' && editingCategory?.oldName === cat ? (
                       <input
                         autoFocus
-                        className="bg-transparent border-b border-green-300 outline-none w-24"
+                        className="bg-transparent border-b border-green-300 dark:border-green-700 outline-none w-24 text-slate-800 dark:text-slate-100"
                         value={editingCategory.newName}
                         onChange={(e) => setEditingCategory({ ...editingCategory, newName: e.target.value })}
                         onBlur={handleEditCategory}
@@ -493,7 +472,7 @@ const SettingsPage: React.FC = () => {
                   placeholder={t('addCategory')}
                   value={newIncomeCategoryInput}
                   onChange={(e) => setNewIncomeCategoryInput(e.target.value)}
-                  className="flex-1 p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="flex-1 p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') handleAddCategory('income');
                   }}
@@ -508,17 +487,17 @@ const SettingsPage: React.FC = () => {
             </div>
 
             <div className="space-y-4">
-              <h4 className="font-bold text-slate-700 flex items-center gap-2">
+              <h4 className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
                 <span className="w-2 h-2 bg-red-500 rounded-full" />
                 {t('expenseCategories')}
               </h4>
               <div className="flex flex-wrap gap-2">
                 {userProfile?.expenseCategories?.map((cat: string) => (
-                  <div key={cat} className="flex items-center gap-2 bg-red-50 text-red-700 px-4 py-2 rounded-xl font-medium">
+                  <div key={cat} className="flex items-center gap-2 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 px-4 py-2 rounded-xl font-medium">
                     {editingCategory?.type === 'expense' && editingCategory?.oldName === cat ? (
                       <input
                         autoFocus
-                        className="bg-transparent border-b border-red-300 outline-none w-24"
+                        className="bg-transparent border-b border-red-300 dark:border-red-700 outline-none w-24 text-slate-800 dark:text-slate-100"
                         value={editingCategory.newName}
                         onChange={(e) => setEditingCategory({ ...editingCategory, newName: e.target.value })}
                         onBlur={handleEditCategory}
@@ -558,7 +537,7 @@ const SettingsPage: React.FC = () => {
                   placeholder={t('addCategory')}
                   value={newExpenseCategoryInput}
                   onChange={(e) => setNewExpenseCategoryInput(e.target.value)}
-                  className="flex-1 p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="flex-1 p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') handleAddCategory('expense');
                   }}
@@ -578,12 +557,12 @@ const SettingsPage: React.FC = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 space-y-6 md:col-span-2"
+          className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 space-y-6 md:col-span-2"
         >
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <Bell className="w-6 h-6 text-orange-600" />
-              <h3 className="text-xl font-bold text-slate-800">{t('fixedFinances')}</h3>
+              <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">{t('fixedFinances')}</h3>
             </div>
             <button
               onClick={() => {
@@ -601,15 +580,15 @@ const SettingsPage: React.FC = () => {
             {fixedFinances.map((fixed) => (
               <div 
                 key={fixed.id} 
-                className="p-6 bg-slate-50 rounded-2xl border border-slate-100 relative group cursor-pointer hover:border-blue-200 transition-all"
+                className="p-6 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-700 relative group cursor-pointer hover:border-blue-200 dark:hover:border-blue-800 transition-all"
                 onClick={() => openEditFixed(fixed)}
               >
                 <button
                   onClick={async (e) => {
                     e.stopPropagation();
                     setConfirmModal({
-                      title: 'Delete Recurring Finance',
-                      message: 'Are you sure you want to delete this recurring finance?',
+                      title: t('delete'),
+                      message: t('confirmDelete'),
                       onConfirm: async () => {
                         try {
                           await deleteDoc(doc(db, 'fixedFinances', fixed.id));
@@ -627,18 +606,18 @@ const SettingsPage: React.FC = () => {
                 <div className="flex items-center gap-2 mb-2">
                   <span className={cn(
                     "px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider",
-                    fixed.type === 'income' ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                    fixed.type === 'income' ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300" : "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300"
                   )}>
                     {t(fixed.type)}
                   </span>
-                  <span className="text-xs text-slate-500 font-medium">{t('dayOfMonth')}: {fixed.dayOfMonth}</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">{t('dayOfMonth')}: {fixed.dayOfMonth}</span>
                 </div>
-                <h4 className="font-bold text-slate-800 text-lg">{fixed.category}</h4>
-                <p className="text-2xl font-black text-slate-900 mt-1">
+                <h4 className="font-bold text-slate-800 dark:text-slate-100 text-lg">{fixed.category}</h4>
+                <p className="text-2xl font-black text-slate-900 dark:text-white mt-1">
                   {formatCurrency(fixed.amount, language)}
                 </p>
                 {fixed.description && (
-                  <p className="text-sm text-slate-500 mt-2 line-clamp-2">{fixed.description}</p>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 line-clamp-2">{fixed.description}</p>
                 )}
               </div>
             ))}
@@ -652,10 +631,10 @@ const SettingsPage: React.FC = () => {
           <motion.div
             initial={{ opacity: 0, scale: 0.9, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden"
+            className="bg-white dark:bg-slate-800 w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden"
           >
-            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-slate-800">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100">
                 {editingFixedId ? t('edit') : t('addFixed')}
               </h2>
               <button 
@@ -663,19 +642,19 @@ const SettingsPage: React.FC = () => {
                   setIsAddingFixed(false);
                   setEditingFixedId(null);
                 }} 
-                className="p-2 hover:bg-slate-50 rounded-full text-slate-400"
+                className="p-2 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-full text-slate-400"
               >
                 <X className="w-6 h-6" />
               </button>
             </div>
             <form onSubmit={handleAddFixed} className="p-8 space-y-6">
-              <div className="flex p-1 bg-slate-100 rounded-2xl">
+              <div className="flex p-1 bg-slate-100 dark:bg-slate-700 rounded-2xl">
                 <button
                   type="button"
                   onClick={() => setFixedForm({ ...fixedForm, type: 'income' })}
                   className={cn(
                     "flex-1 py-3 rounded-xl font-semibold transition-all",
-                    fixedForm.type === 'income' ? "bg-white text-green-600 shadow-sm" : "text-slate-500"
+                    fixedForm.type === 'income' ? "bg-white dark:bg-slate-600 text-green-600 dark:text-green-400 shadow-sm" : "text-slate-500 dark:text-slate-400"
                   )}
                 >
                   {t('income')}
@@ -685,7 +664,7 @@ const SettingsPage: React.FC = () => {
                   onClick={() => setFixedForm({ ...fixedForm, type: 'expense' })}
                   className={cn(
                     "flex-1 py-3 rounded-xl font-semibold transition-all",
-                    fixedForm.type === 'expense' ? "bg-white text-red-600 shadow-sm" : "text-slate-500"
+                    fixedForm.type === 'expense' ? "bg-white dark:bg-slate-600 text-red-600 dark:text-red-400 shadow-sm" : "text-slate-500 dark:text-slate-400"
                   )}
                 >
                   {t('expense')}
@@ -694,17 +673,17 @@ const SettingsPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-600">{t('amount')}</label>
+                  <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('amount')}</label>
                   <input
                     type="number"
                     required
                     value={fixedForm.amount}
                     onChange={(e) => setFixedForm({ ...fixedForm, amount: e.target.value })}
-                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="w-full p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100"
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-600">{t('dayOfMonth')}</label>
+                  <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('dayOfMonth')}</label>
                   <input
                     type="number"
                     min="1"
@@ -712,18 +691,18 @@ const SettingsPage: React.FC = () => {
                     required
                     value={fixedForm.dayOfMonth}
                     onChange={(e) => setFixedForm({ ...fixedForm, dayOfMonth: e.target.value })}
-                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="w-full p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100"
                   />
                 </div>
               </div>
 
       <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-600">{t('category')}</label>
+                <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('category')}</label>
                 <select
                   required
                   value={fixedForm.category}
                   onChange={(e) => setFixedForm({ ...fixedForm, category: e.target.value })}
-                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="w-full p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100"
                 >
                   <option value="">Select Category</option>
                   {(fixedForm.type === 'income' 
@@ -736,11 +715,11 @@ const SettingsPage: React.FC = () => {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-600">{t('description')}</label>
+                <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('description')}</label>
                 <textarea
                   value={fixedForm.description}
                   onChange={(e) => setFixedForm({ ...fixedForm, description: e.target.value })}
-                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none h-24 resize-none"
+                  className="w-full p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none h-24 resize-none text-slate-800 dark:text-slate-100"
                 />
               </div>
 
@@ -761,19 +740,19 @@ const SettingsPage: React.FC = () => {
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center space-y-6"
+            className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center space-y-6"
           >
-            <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto">
+            <div className="w-16 h-16 bg-blue-50 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto">
               <AlertCircle className="w-8 h-8 text-blue-500" />
             </div>
             <div className="space-y-2">
-              <h3 className="text-xl font-bold text-slate-800">{confirmModal.title}</h3>
-              <p className="text-slate-500">{confirmModal.message}</p>
+              <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">{confirmModal.title}</h3>
+              <p className="text-slate-500 dark:text-slate-400">{confirmModal.message}</p>
             </div>
             <div className="flex gap-4">
               <button
                 onClick={() => setConfirmModal(null)}
-                className="flex-1 py-3 px-6 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-all"
+                className="flex-1 py-3 px-6 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-xl font-bold hover:bg-slate-200 dark:hover:bg-slate-600 transition-all"
               >
                 {t('cancel')}
               </button>
@@ -794,11 +773,11 @@ const SettingsPage: React.FC = () => {
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center space-y-6"
+            className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center space-y-6"
           >
             <div className={cn(
               "w-16 h-16 rounded-full flex items-center justify-center mx-auto",
-              alertModal.title === 'Error' ? "bg-red-50" : "bg-green-50"
+              alertModal.title === 'Error' ? "bg-red-50 dark:bg-red-900/30" : "bg-green-50 dark:bg-green-900/30"
             )}>
               {alertModal.title === 'Error' ? (
                 <AlertCircle className="w-8 h-8 text-red-500" />
@@ -807,12 +786,12 @@ const SettingsPage: React.FC = () => {
               )}
             </div>
             <div className="space-y-2">
-              <h3 className="text-xl font-bold text-slate-800">{alertModal.title}</h3>
-              <p className="text-slate-500">{alertModal.message}</p>
+              <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">{alertModal.title}</h3>
+              <p className="text-slate-500 dark:text-slate-400">{alertModal.message}</p>
             </div>
             <button
               onClick={() => setAlertModal(null)}
-              className="w-full py-3 px-6 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-all"
+              className="w-full py-3 px-6 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-xl font-bold hover:bg-slate-200 dark:hover:bg-slate-600 transition-all"
             >
               OK
             </button>
