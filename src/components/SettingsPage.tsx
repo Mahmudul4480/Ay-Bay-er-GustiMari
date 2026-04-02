@@ -37,39 +37,16 @@ const SettingsPage: React.FC = () => {
   const [newExpenseCategoryInput, setNewExpenseCategoryInput] = useState('');
 
   const handleAddMember = async () => {
-    const trimmed = newMemberInput.trim();
-    if (!trimmed || !user) return;
-    
     const currentMembers = userProfile?.familyMembers || [];
-    if (!currentMembers.includes(trimmed)) {
-      const updated = [...currentMembers, trimmed];
+    if (newMemberInput && !currentMembers.includes(newMemberInput)) {
+      const updated = [...currentMembers, newMemberInput];
       try {
-        await updateDoc(doc(db, 'users', user.uid), { familyMembers: updated });
-        setNewMemberInput('');
+        await updateDoc(doc(db, 'users', user!.uid), { familyMembers: updated });
       } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+        handleFirestoreError(error, OperationType.UPDATE, `users/${user!.uid}`);
       }
-    } else {
-      setAlertModal({ title: t('info'), message: t('memberExists') || 'Member already exists' });
+      setNewMemberInput('');
     }
-  };
-
-  const handleRemoveMember = async (member: string) => {
-    if (!user || !userProfile?.familyMembers) return;
-    
-    setConfirmModal({
-      title: t('removeMember') || 'Remove Family Member',
-      message: `Are you sure you want to remove ${member}?`,
-      onConfirm: async () => {
-        const updated = userProfile.familyMembers.filter((m: string) => m !== member);
-        try {
-          await updateDoc(doc(db, 'users', user.uid), { familyMembers: updated });
-        } catch (error) {
-          handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
-        }
-        setConfirmModal(null);
-      }
-    });
   };
 
   const handleAddCategory = async (type: 'income' | 'expense') => {
@@ -122,33 +99,14 @@ const SettingsPage: React.FC = () => {
   const handleAddFixed = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !userProfile) return;
-    
-    const amountNum = parseFloat(fixedForm.amount);
-    const dayNum = parseInt(fixedForm.dayOfMonth);
-    
-    if (isNaN(amountNum) || amountNum <= 0) {
-      setAlertModal({ title: t('error'), message: 'Please enter a valid amount' });
-      return;
-    }
-    
-    if (isNaN(dayNum) || dayNum < 1 || dayNum > 31) {
-      setAlertModal({ title: t('error'), message: 'Please enter a valid day of month (1-31)' });
-      return;
-    }
-
-    if (!fixedForm.category) {
-      setAlertModal({ title: t('error'), message: 'Please select a category' });
-      return;
-    }
-
     try {
       const data = {
         userId: user.uid,
-        amount: amountNum,
+        amount: parseFloat(fixedForm.amount),
         type: fixedForm.type,
         category: fixedForm.category,
         description: fixedForm.description,
-        dayOfMonth: dayNum,
+        dayOfMonth: parseInt(fixedForm.dayOfMonth),
         updatedAt: serverTimestamp()
       };
 
@@ -296,18 +254,6 @@ const SettingsPage: React.FC = () => {
     `;
     
     document.body.appendChild(headerEl);
-    
-    // Wait for the logo image to load
-    const logoImg = headerEl.querySelector('img');
-    if (logoImg) {
-      await new Promise((resolve) => {
-        if (logoImg.complete) resolve(null);
-        else {
-          logoImg.onload = () => resolve(null);
-          logoImg.onerror = () => resolve(null);
-        }
-      });
-    }
     
     try {
       const html2canvas = (await import('html2canvas')).default;
@@ -510,9 +456,16 @@ const SettingsPage: React.FC = () => {
                 {member}
                 {member !== 'Self' && (
                   <button 
-                    onClick={() => handleRemoveMember(member)}
-                    className="hover:text-red-500 transition-colors"
-                    title={t('remove')}
+                    onClick={async () => {
+                      if (!userProfile?.familyMembers) return;
+                      const updated = userProfile.familyMembers.filter((m: string) => m !== member);
+                      try {
+                        await updateDoc(doc(db, 'users', user!.uid), { familyMembers: updated });
+                      } catch (error) {
+                        handleFirestoreError(error, OperationType.UPDATE, `users/${user!.uid}`);
+                      }
+                    }}
+                    className="hover:text-red-500"
                   >
                     <X className="w-4 h-4" />
                   </button>
