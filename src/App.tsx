@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 import Dashboard from './components/Dashboard';
 import TransactionForm from './components/TransactionForm';
+import TransactionList from './components/TransactionList';
 import DebtTracker from './components/DebtTracker';
 import SettingsPage from './components/SettingsPage';
 
@@ -165,6 +166,7 @@ const AppContent: React.FC = () => {
 
   const tabs = [
     { id: 'dashboard', label: t('dashboard'), icon: LayoutDashboard },
+    { id: 'transactions', label: t('transactions'), icon: CreditCard },
     { id: 'settings', label: t('settings'), icon: Settings },
   ];
 
@@ -288,6 +290,7 @@ const AppContent: React.FC = () => {
       {/* Main Content */}
       <main className="flex-1 p-4 md:p-8 max-w-7xl mx-auto w-full">
         {activeTab === 'dashboard' && <Dashboard onTabChange={setActiveTab} />}
+        {activeTab === 'transactions' && <TransactionList />}
         {activeTab === 'debts' && <DebtTracker />}
         {activeTab === 'settings' && <SettingsPage />}
       </main>

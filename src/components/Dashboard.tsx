@@ -3,10 +3,11 @@ import { useTransactions } from '../hooks/useTransactions';
 import { useLocalization } from '../contexts/LocalizationContext';
 import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency, cn } from '../lib/utils';
-import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, LineChart, Line, CartesianGrid } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
-import { TrendingUp, TrendingDown, Wallet, CreditCard, AlertTriangle, Trash2, PieChart as PieChartIcon } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, CreditCard, AlertTriangle, Trash2, PieChart as PieChartIcon, Edit2, ArrowRight, X } from 'lucide-react';
 import TransactionForm from './TransactionForm';
+import { Transaction } from '../hooks/useTransactions';
 import { deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
@@ -20,7 +21,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
   const { t, language } = useLocalization();
   const { userProfile } = useAuth();
   const [modalType, setModalType] = React.useState<'income' | 'expense' | null>(null);
+  const [editingTransaction, setEditingTransaction] = React.useState<Transaction | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = React.useState<string | null>(null);
+  const [showBalanceBreakdown, setShowBalanceBreakdown] = React.useState(false);
 
   const regularTransactions = transactions.filter(t => !t.debtId);
 
@@ -108,6 +111,24 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
 
   const COLORS = ['#3b82f6', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6', '#ec4899'];
 
+  const trendData = regularTransactions.reduce((acc: any[], curr) => {
+    const date = curr.date && typeof curr.date.toDate === 'function' ? curr.date.toDate() : new Date();
+    const month = date.toLocaleString('default', { month: 'short', year: '2-digit' });
+    const existing = acc.find(a => a.name === month);
+    if (existing) {
+      if (curr.type === 'income') existing.income += curr.amount;
+      else existing.expense += curr.amount;
+    } else {
+      acc.push({ 
+        name: month, 
+        income: curr.type === 'income' ? curr.amount : 0, 
+        expense: curr.type === 'expense' ? curr.amount : 0,
+        timestamp: date.getTime() 
+      });
+    }
+    return acc;
+  }, []).sort((a, b) => a.timestamp - b.timestamp);
+
   return (
     <div className="space-y-8">
       {isOverBudget && (
@@ -128,13 +149,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: i * 0.1 }}
             onClick={() => {
-              if (stat.id === 'income') setModalType('income');
+              if (stat.id === 'balance') setShowBalanceBreakdown(true);
+              else if (stat.id === 'income') setModalType('income');
               else if (stat.id === 'expense') setModalType('expense');
               else if (stat.id === 'netDebt' && onTabChange) onTabChange('debts');
             }}
             className={cn(
               "bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 flex items-center gap-4 transition-colors",
-              (stat.id === 'income' || stat.id === 'expense' || stat.id === 'netDebt') && "cursor-pointer hover:shadow-md transition-shadow active:scale-95"
+              (stat.id === 'balance' || stat.id === 'income' || stat.id === 'expense' || stat.id === 'netDebt') && "cursor-pointer hover:shadow-md transition-shadow active:scale-95"
             )}
           >
             <div className={cn("p-4 rounded-2xl", stat.bg, stat.bg.includes('blue') && 'dark:bg-blue-900/20', stat.bg.includes('green') && 'dark:bg-green-900/20', stat.bg.includes('red') && 'dark:bg-red-900/20', stat.bg.includes('orange') && 'dark:bg-orange-900/20', stat.bg.includes('slate') && 'dark:bg-slate-700')}>
@@ -146,6 +168,63 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
             </div>
           </motion.div>
         ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors lg:col-span-2"
+        >
+          <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-6">Income & Expense Trends</h3>
+          <div className="h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={trendData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                <XAxis 
+                  dataKey="name" 
+                  tick={{ fill: '#94a3b8' }} 
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis 
+                  tick={{ fill: '#94a3b8' }} 
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(value) => `৳${value}`}
+                />
+                <Tooltip 
+                  contentStyle={{ 
+                    borderRadius: '16px', 
+                    border: 'none', 
+                    boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+                    backgroundColor: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
+                    color: document.documentElement.classList.contains('dark') ? '#fff' : '#000'
+                  }} 
+                />
+                <Legend />
+                <Line 
+                  type="monotone" 
+                  dataKey="income" 
+                  stroke="#10b981" 
+                  strokeWidth={3} 
+                  dot={{ r: 4, fill: '#10b981' }}
+                  activeDot={{ r: 6 }}
+                  name={t('income')} 
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="expense" 
+                  stroke="#ef4444" 
+                  strokeWidth={3} 
+                  dot={{ r: 4, fill: '#ef4444' }}
+                  activeDot={{ r: 6 }}
+                  name={t('expense')} 
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </motion.div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -292,7 +371,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
       </div>
 
       <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
-        <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-6">{t('dashboard')} - Recent Transactions</h3>
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-xl font-bold text-slate-800 dark:text-white">{t('dashboard')} - Recent Transactions</h3>
+          {onTabChange && (
+            <button 
+              onClick={() => onTabChange('transactions')}
+              className="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-bold hover:gap-3 transition-all"
+            >
+              View All <ArrowRight className="w-4 h-4" />
+            </button>
+          )}
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
@@ -318,12 +407,20 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                     {tx.type === 'income' ? '+' : '-'}{formatCurrency(tx.amount, language)}
                   </td>
                   <td className="py-4 text-right">
-                    <button 
-                      onClick={() => setDeleteConfirmId(tx.id)}
-                      className="p-2 hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-500 rounded-lg transition-all"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center justify-end gap-1">
+                      <button 
+                        onClick={() => setEditingTransaction(tx)}
+                        className="p-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-slate-400 hover:text-blue-500 rounded-lg transition-all"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => setDeleteConfirmId(tx.id)}
+                        className="p-2 hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-500 rounded-lg transition-all"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -332,11 +429,75 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         </div>
       </div>
 
+      {/* Balance Breakdown Modal */}
+      <AnimatePresence>
+        {showBalanceBreakdown && (
+          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-slate-800 w-full max-w-md rounded-3xl shadow-2xl overflow-hidden transition-colors"
+            >
+              <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-slate-800 dark:text-white">{t('totalBalance')} Details</h2>
+                <button onClick={() => setShowBalanceBreakdown(false)} className="p-2 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-full text-slate-400">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              <div className="p-8 space-y-6">
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center p-4 bg-green-50 dark:bg-green-900/20 rounded-2xl">
+                    <span className="text-slate-600 dark:text-slate-400 font-medium">{t('monthlyIncome')} (+)</span>
+                    <span className="text-green-600 dark:text-green-400 font-bold">{formatCurrency(totalIncome, language)}</span>
+                  </div>
+                  <div className="flex justify-between items-center p-4 bg-red-50 dark:bg-red-900/20 rounded-2xl">
+                    <span className="text-slate-600 dark:text-slate-400 font-medium">{t('monthlyExpense')} (-)</span>
+                    <span className="text-red-600 dark:text-red-400 font-bold">{formatCurrency(totalExpense, language)}</span>
+                  </div>
+                  <div className="flex justify-between items-center p-4 bg-orange-50 dark:bg-orange-900/20 rounded-2xl">
+                    <span className="text-slate-600 dark:text-slate-400 font-medium">{t('lent')} / Paona (-)</span>
+                    <span className="text-orange-600 dark:text-orange-400 font-bold">{formatCurrency(totalLent, language)}</span>
+                  </div>
+                  <div className="flex justify-between items-center p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl">
+                    <span className="text-slate-600 dark:text-slate-400 font-medium">{t('borrowed')} / Dena (+)</span>
+                    <span className="text-blue-600 dark:text-blue-400 font-bold">{formatCurrency(totalBorrowed, language)}</span>
+                  </div>
+                </div>
+
+                <div className="pt-6 border-t border-slate-100 dark:border-slate-700">
+                  <div className="flex justify-between items-center">
+                    <span className="text-lg font-bold text-slate-800 dark:text-white">{t('totalBalance')}</span>
+                    <span className="text-2xl font-black text-blue-600 dark:text-blue-400">{formatCurrency(balance, language)}</span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-2 italic">
+                    Formula: (Income - Expense) - Lent + Borrowed
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => setShowBalanceBreakdown(false)}
+                  className="w-full py-4 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-2xl font-bold hover:bg-slate-200 dark:hover:bg-slate-600 transition-all"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {modalType && (
           <TransactionForm 
             onClose={() => setModalType(null)} 
             initialType={modalType} 
+          />
+        )}
+        {editingTransaction && (
+          <TransactionForm 
+            transaction={editingTransaction}
+            onClose={() => setEditingTransaction(null)} 
           />
         )}
       </AnimatePresence>

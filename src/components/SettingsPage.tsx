@@ -9,7 +9,9 @@ import { motion } from 'motion/react';
 import { Download, Upload, FileText, Save, Globe, Shield, Bell, AlertCircle, User, X, Plus } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
+
+import { convertBengaliToAscii, sanitizeDecimal, sanitizeInteger } from '../lib/numberUtils';
 
 const SettingsPage: React.FC = () => {
   const { user, userProfile } = useAuth();
@@ -224,22 +226,40 @@ const SettingsPage: React.FC = () => {
 
   const generatePDF = () => {
     const doc = new jsPDF() as any;
-    doc.text('Amar Hisab - Monthly Report', 14, 15);
-    doc.text(`User: ${user?.displayName}`, 14, 22);
-    doc.text(`Date: ${new Date().toLocaleDateString()}`, 14, 29);
+    
+    // Add Logo (Simple blue square with AH)
+    doc.setFillColor(59, 130, 246); // Blue-600
+    doc.roundedRect(14, 10, 15, 15, 3, 3, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('AH', 17.5, 20);
+
+    // Header Text
+    doc.setTextColor(30, 41, 59); // Slate-800
+    doc.setFontSize(18);
+    doc.text('Amar Hisab - Monthly Report', 35, 20);
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139); // Slate-500
+    doc.text(`User: ${user?.displayName || user?.email}`, 14, 35);
+    doc.text(`Date: ${new Date().toLocaleDateString()}`, 14, 40);
 
     const tableData = transactions.map(tx => [
       tx.date && typeof tx.date.toDate === 'function' ? tx.date.toDate().toLocaleDateString() : 'N/A',
       tx.category,
       tx.type.toUpperCase(),
       tx.amount.toFixed(2),
-      tx.familyMember
+      tx.note || tx.familyMember
     ]);
 
-    doc.autoTable({
-      startY: 35,
-      head: [['Date', 'Category', 'Type', 'Amount', 'Member']],
+    autoTable(doc, {
+      startY: 45,
+      head: [['Date', 'Category', 'Type', 'Amount', 'Note/Member']],
       body: tableData,
+      headStyles: { fillColor: [59, 130, 246] },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
     });
 
     doc.save(`amar-hisab-report-${new Date().toISOString().split('T')[0]}.pdf`);
@@ -294,9 +314,15 @@ const SettingsPage: React.FC = () => {
           </div>
           <div className="space-y-4">
             <input
-              type="number"
+              type="text"
+              inputMode="decimal"
               value={budgetLimit}
-              onChange={(e) => setBudgetLimit(parseFloat(e.target.value))}
+              onChange={(e) => {
+                const val = e.target.value;
+                const sanitized = sanitizeDecimal(val);
+                console.log('Budget Limit Input:', { val, sanitized });
+                setBudgetLimit(sanitized);
+              }}
               placeholder="Enter monthly limit"
               className="w-full p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100"
             />
@@ -675,22 +701,35 @@ const SettingsPage: React.FC = () => {
                 <div className="space-y-2">
                   <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('amount')}</label>
                   <input
-                    type="number"
+                    type="text"
+                    inputMode="decimal"
                     required
                     value={fixedForm.amount}
-                    onChange={(e) => setFixedForm({ ...fixedForm, amount: e.target.value })}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const sanitized = sanitizeDecimal(val);
+                      console.log('Fixed Amount Input:', { val, sanitized });
+                      setFixedForm({ ...fixedForm, amount: sanitized });
+                    }}
                     className="w-full p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100"
                   />
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('dayOfMonth')}</label>
                   <input
-                    type="number"
-                    min="1"
-                    max="31"
+                    type="text"
+                    inputMode="numeric"
                     required
                     value={fixedForm.dayOfMonth}
-                    onChange={(e) => setFixedForm({ ...fixedForm, dayOfMonth: e.target.value })}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const sanitized = sanitizeInteger(val);
+                      console.log('Fixed Day Input:', { val, sanitized });
+                      const num = parseInt(sanitized);
+                      if (sanitized === '' || (num >= 1 && num <= 31)) {
+                        setFixedForm({ ...fixedForm, dayOfMonth: sanitized });
+                      }
+                    }}
                     className="w-full p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100"
                   />
                 </div>

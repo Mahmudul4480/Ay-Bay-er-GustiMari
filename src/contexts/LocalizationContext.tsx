@@ -67,6 +67,11 @@ export const translations: Translations = {
   errorAddingCategory: { en: 'Error adding category. Please try again.', bn: 'বিভাগ যোগ করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।' },
   edit: { en: 'Edit', bn: 'সম্পাদনা' },
   add: { en: 'Add', bn: 'যোগ করুন' },
+  transactions: { en: 'Transactions', bn: 'লেনদেনসমূহ' },
+  editTransaction: { en: 'Edit Transaction', bn: 'লেনদেন সম্পাদনা করুন' },
+  all: { en: 'All', bn: 'সব' },
+  search: { en: 'Search', bn: 'খুঁজুন' },
+  noTransactions: { en: 'No transactions found', bn: 'কোন লেনদেন পাওয়া যায়নি' },
 };
 
 interface LocalizationContextType {

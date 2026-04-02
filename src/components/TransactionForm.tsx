@@ -8,22 +8,27 @@ import { motion } from 'motion/react';
 import { X, Save } from 'lucide-react';
 import { cn } from '../lib/utils';
 
+import { Transaction } from '../hooks/useTransactions';
+
 interface TransactionFormProps {
   onClose: () => void;
   initialType?: 'income' | 'expense';
+  transaction?: Transaction;
 }
 
-const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, initialType }) => {
+import { convertBengaliToAscii, sanitizeDecimal } from '../lib/numberUtils';
+
+const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, initialType, transaction }) => {
   const { user, userProfile } = useAuth();
   const { t } = useLocalization();
-  const [amount, setAmount] = useState('');
-  const [type, setType] = useState<'income' | 'expense'>(initialType || 'expense');
-  const [category, setCategory] = useState('');
+  const [amount, setAmount] = useState(transaction ? transaction.amount.toString() : '');
+  const [type, setType] = useState<'income' | 'expense'>(transaction ? transaction.type : (initialType || 'expense'));
+  const [category, setCategory] = useState(transaction ? transaction.category : '');
   const [newCategory, setNewCategory] = useState('');
   const [isAddingCategory, setIsAddingCategory] = useState(false);
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [note, setNote] = useState('');
-  const [familyMember, setFamilyMember] = useState('Self');
+  const [date, setDate] = useState(transaction ? transaction.date.toDate().toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+  const [note, setNote] = useState(transaction ? transaction.note : '');
+  const [familyMember, setFamilyMember] = useState(transaction ? transaction.familyMember : 'Self');
   const [newMember, setNewMember] = useState('');
   const [isAddingMember, setIsAddingMember] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -74,23 +79,32 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, initialType 
         }
       }
 
+      const transactionData = {
+        userId: user.uid,
+        amount: parseFloat(amount),
+        type,
+        category: savedCategory,
+        date: new Date(date),
+        note,
+        familyMember: savedMember,
+        updatedAt: serverTimestamp(),
+      };
+
       try {
-        await addDoc(collection(db, 'transactions'), {
-          userId: user.uid,
-          amount: parseFloat(amount),
-          type,
-          category: savedCategory,
-          date: new Date(date),
-          note,
-          familyMember: savedMember,
-          createdAt: serverTimestamp(),
-        });
+        if (transaction) {
+          await updateDoc(doc(db, 'transactions', transaction.id), transactionData);
+        } else {
+          await addDoc(collection(db, 'transactions'), {
+            ...transactionData,
+            createdAt: serverTimestamp(),
+          });
+        }
       } catch (error) {
-        handleFirestoreError(error, OperationType.CREATE, 'transactions');
+        handleFirestoreError(error, transaction ? OperationType.UPDATE : OperationType.CREATE, transaction ? `transactions/${transaction.id}` : 'transactions');
       }
       onClose();
     } catch (error) {
-      console.error('Error adding transaction:', error);
+      console.error('Error saving transaction:', error);
     } finally {
       setIsSubmitting(false);
     }
@@ -145,10 +159,16 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, initialType 
             <div className="space-y-2">
               <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('amount')}</label>
               <input
-                type="number"
+                type="text"
+                inputMode="decimal"
                 required
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const sanitized = sanitizeDecimal(val);
+                  console.log('Amount Input:', { val, sanitized });
+                  setAmount(sanitized);
+                }}
                 placeholder="0.00"
                 className="w-full p-4 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-lg font-bold dark:text-white"
               />

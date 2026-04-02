@@ -7,7 +7,9 @@ import { collection, addDoc, updateDoc, doc, serverTimestamp, deleteDoc, query, 
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Trash2, CheckCircle, Clock, User, DollarSign, Calendar, X, Phone } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, Clock, User, DollarSign, Calendar, X, Phone, Filter, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+
+import { convertBengaliToAscii, sanitizeDecimal } from '../lib/numberUtils';
 
 const DebtTracker: React.FC = () => {
   const { debts = [] } = useTransactions();
@@ -15,6 +17,8 @@ const DebtTracker: React.FC = () => {
   const { user } = useAuth();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [filterStatus, setFilterStatus] = useState<'all' | 'paid' | 'unpaid'>('all');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   const [formData, setFormData] = useState({
     personName: '',
@@ -108,10 +112,19 @@ const DebtTracker: React.FC = () => {
       //   Borrowed (borrowed) -> Unpaid: Money enters pocket again (income)
       
       let transactionType: 'income' | 'expense';
+      let category: string;
+      let note: string;
+
       if (newStatus === 'paid') {
         transactionType = debt.type === 'lent' ? 'income' : 'expense';
+        category = debt.type === 'lent' ? 'Debit Settlement' : 'Debit Reversal';
+        note = debt.type === 'lent' 
+          ? `Debit Settlement (Collected from ${debt.personName})` 
+          : `Debit Reversal (Pay to ${debt.personName})`;
       } else {
         transactionType = debt.type === 'lent' ? 'expense' : 'income';
+        category = 'Debt Reversal';
+        note = `Reversed debt with ${debt.personName}`;
       }
 
       try {
@@ -119,9 +132,9 @@ const DebtTracker: React.FC = () => {
           userId: user!.uid,
           amount: debt.amount,
           type: transactionType,
-          category: newStatus === 'paid' ? 'Debt Settlement' : 'Debt Reversal',
+          category,
           date: serverTimestamp(),
-          note: `${newStatus === 'paid' ? 'Settled' : 'Reversed'} debt with ${debt.personName}`,
+          note,
           familyMember: 'Self',
           isFixed: false,
           debtId: debt.id
@@ -189,17 +202,76 @@ const DebtTracker: React.FC = () => {
     return debt.type === 'borrowed' ? acc + debt.amount : acc;
   }, 0);
 
+  const maskPhoneNumber = (phone: string) => {
+    if (!phone) return '';
+    if (phone.length <= 4) return phone;
+    const lastFour = phone.slice(-4);
+    const maskedPart = phone.slice(0, -4).replace(/[0-9]/g, 'X');
+    return maskedPart + lastFour;
+  };
+
+  const filteredAndSortedDebts = debts
+    .filter(debt => {
+      if (filterStatus === 'all') return true;
+      return debt.status === filterStatus;
+    })
+    .sort((a, b) => {
+      const dateA = a.dueDate && typeof a.dueDate.toDate === 'function' ? a.dueDate.toDate().getTime() : 0;
+      const dateB = b.dueDate && typeof b.dueDate.toDate === 'function' ? b.dueDate.toDate().getTime() : 0;
+      return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+    });
+
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <h2 className="text-3xl font-bold text-slate-800 dark:text-white">{t('netDebt')}</h2>
-        <button
-          onClick={() => setIsModalOpen(true)}
-          className="flex items-center gap-2 bg-blue-600 text-white py-3 px-6 rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none active:scale-95"
-        >
-          <Plus className="w-5 h-5" />
-          {t('addTransaction')}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-1 shadow-sm">
+            <button
+              onClick={() => setFilterStatus('all')}
+              className={cn(
+                "px-4 py-2 rounded-xl text-sm font-bold transition-all",
+                filterStatus === 'all' ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700"
+              )}
+            >
+              {t('all')}
+            </button>
+            <button
+              onClick={() => setFilterStatus('unpaid')}
+              className={cn(
+                "px-4 py-2 rounded-xl text-sm font-bold transition-all",
+                filterStatus === 'unpaid' ? "bg-orange-600 text-white" : "text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700"
+              )}
+            >
+              {t('unpaid')}
+            </button>
+            <button
+              onClick={() => setFilterStatus('paid')}
+              className={cn(
+                "px-4 py-2 rounded-xl text-sm font-bold transition-all",
+                filterStatus === 'paid' ? "bg-green-600 text-white" : "text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700"
+              )}
+            >
+              {t('paid')}
+            </button>
+          </div>
+
+          <button
+            onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+            className="flex items-center gap-2 bg-white dark:bg-slate-800 py-3 px-4 rounded-2xl font-bold text-slate-600 dark:text-slate-300 border border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all shadow-sm"
+          >
+            {sortOrder === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />}
+            {t('dueDate')}
+          </button>
+
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center gap-2 bg-blue-600 text-white py-3 px-6 rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none active:scale-95"
+          >
+            <Plus className="w-5 h-5" />
+            {t('addTransaction')}
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
@@ -228,7 +300,7 @@ const DebtTracker: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {debts.map((debt) => (
+        {filteredAndSortedDebts.map((debt) => (
           <motion.div
             key={debt.id}
             layout
@@ -236,7 +308,7 @@ const DebtTracker: React.FC = () => {
             animate={{ opacity: 1, scale: 1 }}
             className={cn(
               "bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 flex flex-col gap-4 relative overflow-hidden transition-colors",
-              debt.status === 'paid' && "opacity-60 grayscale"
+              debt.status === 'paid' && "opacity-80"
             )}
           >
             <div className={cn(
@@ -245,11 +317,20 @@ const DebtTracker: React.FC = () => {
             )} />
             
             <div className="flex items-center justify-between">
-              <div className={cn(
-                "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider",
-                debt.type === 'lent' ? "bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400" : "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400"
-              )}>
-                {debt.type === 'lent' ? t('lent') : t('borrowed')}
+              <div className="flex items-center gap-2">
+                <div className={cn(
+                  "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider",
+                  debt.type === 'lent' ? "bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400" : "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400"
+                )}>
+                  {debt.type === 'lent' ? t('lent') : t('borrowed')}
+                </div>
+                <div className={cn(
+                  "flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider",
+                  debt.status === 'paid' ? "bg-green-500 text-white" : "bg-orange-500 text-white"
+                )}>
+                  {debt.status === 'paid' ? <CheckCircle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                  {t(debt.status)}
+                </div>
               </div>
               <div className="flex gap-2">
                 <button onClick={() => setDeleteConfirmId(debt.id)} className="p-2 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-full text-slate-400 hover:text-red-500 transition-colors">
@@ -268,7 +349,7 @@ const DebtTracker: React.FC = () => {
                 {debt.phoneNumber && (
                   <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-sm">
                     <Phone className="w-3 h-3" />
-                    <span>{debt.phoneNumber}</span>
+                    <span>{maskPhoneNumber(debt.phoneNumber)}</span>
                   </div>
                 )}
               </div>
@@ -385,10 +466,16 @@ const DebtTracker: React.FC = () => {
                   <div className="space-y-2">
                     <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('amount')}</label>
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="decimal"
                       required
                       value={formData.amount}
-                      onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const sanitized = sanitizeDecimal(val);
+                        console.log('Debt Amount Input:', { val, sanitized });
+                        setFormData({ ...formData, amount: sanitized });
+                      }}
                       className="w-full p-4 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none dark:text-white"
                     />
                   </div>
