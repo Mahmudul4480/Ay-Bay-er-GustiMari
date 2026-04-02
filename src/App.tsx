@@ -10,9 +10,10 @@ import TransactionForm from './components/TransactionForm';
 import TransactionList from './components/TransactionList';
 import DebtTracker from './components/DebtTracker';
 import SettingsPage from './components/SettingsPage';
+import Onboarding from './components/Onboarding';
 
 const AppContent: React.FC = () => {
-  const { user, loading } = useAuth();
+  const { user, loading, userProfile } = useAuth();
   const { language, setLanguage, t } = useLocalization();
   const [activeTab, setActiveTab] = React.useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
@@ -24,6 +25,7 @@ const AppContent: React.FC = () => {
     }
     return false;
   });
+  const [loginError, setLoginError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (isDarkMode) {
@@ -49,6 +51,24 @@ const AppContent: React.FC = () => {
 
   if (!user) {
     const isAppBrowser = isInAppBrowser();
+    
+    const handleLogin = async () => {
+      setLoginError(null);
+      try {
+        await loginWithGoogle();
+      } catch (error: any) {
+        console.error("Login failed:", error);
+        let message = "Login failed. Please try again.";
+        if (error.code === 'auth/popup-blocked') {
+          message = "Popup was blocked by your browser. Please allow popups for this site.";
+        } else if (error.code === 'auth/unauthorized-domain') {
+          message = "This domain is not authorized for Firebase Auth. Please add this domain to the 'Authorized domains' list in the Firebase Console.";
+        } else if (error.message) {
+          message = error.message;
+        }
+        setLoginError(message);
+      }
+    };
     
     return (
       <div className="h-screen w-screen flex flex-col items-center justify-center bg-gradient-to-br from-indigo-900 via-purple-800 to-slate-900 p-4 transition-colors overflow-hidden relative">
@@ -92,6 +112,22 @@ const AppContent: React.FC = () => {
             <p className="text-slate-300 font-medium text-sm">Personal Finance & Debt Manager</p>
           </div>
 
+          {loginError && (
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-red-500/20 border border-red-500/30 p-4 rounded-2xl flex items-start gap-3 text-left"
+            >
+              <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-xs font-bold text-red-100">Login Error</p>
+                <p className="text-[10px] text-red-200 leading-relaxed">
+                  {loginError}
+                </p>
+              </div>
+            </motion.div>
+          )}
+
           {!isConfigValid && (
             <motion.div 
               initial={{ opacity: 0, scale: 0.9 }}
@@ -124,7 +160,7 @@ const AppContent: React.FC = () => {
           )}
 
           <button
-            onClick={loginWithGoogle}
+            onClick={handleLogin}
             disabled={!isConfigValid}
             className={cn(
               "w-full flex items-center justify-center gap-3 bg-white/90 backdrop-blur-sm border border-white/20 py-4 px-6 rounded-2xl font-bold text-slate-900 transition-all shadow-md active:scale-95 group",
@@ -164,6 +200,10 @@ const AppContent: React.FC = () => {
     );
   }
 
+  if (userProfile && !userProfile.onboardingCompleted) {
+    return <Onboarding />;
+  }
+
   const tabs = [
     { id: 'dashboard', label: t('dashboard'), icon: LayoutDashboard },
     { id: 'transactions', label: t('transactions'), icon: CreditCard },
@@ -197,9 +237,14 @@ const AppContent: React.FC = () => {
             whileTap={{ scale: 0.9 }}
           />
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-2 text-slate-600 dark:text-slate-300">
-            {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => setIsDarkMode(!isDarkMode)} 
+            className="flex items-center gap-2 p-2 px-3 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-xl transition-all border border-slate-200 dark:border-slate-600 shadow-sm active:scale-95"
+            title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+          >
+            {isDarkMode ? <Sun className="w-5 h-5 text-amber-500" /> : <Moon className="w-5 h-5 text-blue-600" />}
+            <span className="text-xs font-bold hidden sm:inline">{isDarkMode ? 'Light' : 'Dark'}</span>
           </button>
           <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 text-slate-600 dark:text-slate-300">
             {isSidebarOpen ? <X /> : <Menu />}
@@ -245,9 +290,21 @@ const AppContent: React.FC = () => {
               </div>
               <button 
                 onClick={() => setIsDarkMode(!isDarkMode)} 
-                className="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-all hidden md:block"
+                className="w-full flex items-center justify-between gap-3 p-3 px-4 bg-slate-50 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-all border border-slate-100 dark:border-slate-700 shadow-sm group"
               >
-                {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                <div className="flex items-center gap-3">
+                  {isDarkMode ? <Sun className="w-5 h-5 text-amber-500 group-hover:rotate-45 transition-transform" /> : <Moon className="w-5 h-5 text-blue-600 group-hover:-rotate-12 transition-transform" />}
+                  <span className="font-bold text-sm">{isDarkMode ? 'Light Mode' : 'Dark Mode'}</span>
+                </div>
+                <div className={cn(
+                  "w-10 h-5 rounded-full relative transition-colors duration-300",
+                  isDarkMode ? "bg-blue-600" : "bg-slate-300"
+                )}>
+                  <div className={cn(
+                    "absolute top-1 w-3 h-3 bg-white rounded-full transition-all duration-300",
+                    isDarkMode ? "left-6" : "left-1"
+                  )} />
+                </div>
               </button>
             </div>
             <nav className="flex-1 px-4 space-y-2">

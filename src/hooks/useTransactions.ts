@@ -51,14 +51,12 @@ export const useTransactions = () => {
 
     const qTransactions = query(
       collection(db, 'transactions'),
-      where('userId', '==', user.uid),
-      orderBy('date', 'desc')
+      where('userId', '==', user.uid)
     );
 
     const qDebts = query(
       collection(db, 'debts'),
-      where('userId', '==', user.uid),
-      orderBy('dueDate', 'asc')
+      where('userId', '==', user.uid)
     );
 
     const qFixed = query(
@@ -77,7 +75,14 @@ export const useTransactions = () => {
     };
 
     const unsubscribeTransactions = onSnapshot(qTransactions, (snapshot) => {
-      setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transaction)));
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transaction));
+      // Sort by date desc
+      docs.sort((a, b) => {
+        const dateA = a.date?.toMillis() || 0;
+        const dateB = b.date?.toMillis() || 0;
+        return dateB - dateA;
+      });
+      setTransactions(docs);
       transactionsLoaded = true;
       checkLoading();
     }, (error) => {
@@ -87,7 +92,14 @@ export const useTransactions = () => {
     });
 
     const unsubscribeDebts = onSnapshot(qDebts, (snapshot) => {
-      setDebts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Debt)));
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Debt));
+      // Sort by dueDate asc
+      docs.sort((a, b) => {
+        const dateA = a.dueDate?.toMillis() || 0;
+        const dateB = b.dueDate?.toMillis() || 0;
+        return dateA - dateB;
+      });
+      setDebts(docs);
       debtsLoaded = true;
       checkLoading();
     }, (error) => {

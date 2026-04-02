@@ -1,8 +1,95 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "chotan4480@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUser(data) {
+      return data.uid is string && 
+             data.email is string && isValidEmail(data.email) &&
+             (data.budgetLimit == null || data.budgetLimit is number);
+    }
+
+    function isValidTransaction(data) {
+      return data.userId is string && 
+             data.amount is number && data.amount >= 0 &&
+             data.type in ['income', 'expense'] &&
+             data.category is string && data.category.size() > 0;
+    }
+
+    function isValidDebt(data) {
+      return data.userId is string && 
+             data.amount is number && data.amount >= 0 &&
+             data.type in ['lent', 'borrowed'] &&
+             data.personName is string && data.personName.size() > 0 &&
+             data.status in ['unpaid', 'paid'];
+    }
+
+    function isValidFixedFinance(data) {
+      return data.userId is string && 
+             data.amount is number && data.amount >= 0 &&
+             data.type in ['income', 'expense'] &&
+             data.category is string && data.category.size() > 0 &&
+             data.dayOfMonth is int && data.dayOfMonth >= 1 && data.dayOfMonth <= 31;
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data);
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidTransaction(request.resource.data);
+      allow update: if isDocOwner() && request.resource.data.userId == request.auth.uid && isValidTransaction(request.resource.data);
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /debts/{debtId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidDebt(request.resource.data);
+      allow update: if isDocOwner() && request.resource.data.userId == request.auth.uid && isValidDebt(request.resource.data);
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /fixedFinances/{fixedId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidFixedFinance(request.resource.data);
+      allow update: if isDocOwner() && request.resource.data.userId == request.auth.uid && isValidFixedFinance(request.resource.data);
+      allow delete: if isDocOwner() || isAdmin();
     }
   }
 }

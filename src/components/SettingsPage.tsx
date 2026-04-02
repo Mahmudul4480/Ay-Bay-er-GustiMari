@@ -37,16 +37,39 @@ const SettingsPage: React.FC = () => {
   const [newExpenseCategoryInput, setNewExpenseCategoryInput] = useState('');
 
   const handleAddMember = async () => {
+    const trimmed = newMemberInput.trim();
+    if (!trimmed || !user) return;
+    
     const currentMembers = userProfile?.familyMembers || [];
-    if (newMemberInput && !currentMembers.includes(newMemberInput)) {
-      const updated = [...currentMembers, newMemberInput];
+    if (!currentMembers.includes(trimmed)) {
+      const updated = [...currentMembers, trimmed];
       try {
-        await updateDoc(doc(db, 'users', user!.uid), { familyMembers: updated });
+        await updateDoc(doc(db, 'users', user.uid), { familyMembers: updated });
+        setNewMemberInput('');
       } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `users/${user!.uid}`);
+        handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
       }
-      setNewMemberInput('');
+    } else {
+      setAlertModal({ title: t('info'), message: t('memberExists') || 'Member already exists' });
     }
+  };
+
+  const handleRemoveMember = async (member: string) => {
+    if (!user || !userProfile?.familyMembers) return;
+    
+    setConfirmModal({
+      title: t('removeMember') || 'Remove Family Member',
+      message: `Are you sure you want to remove ${member}?`,
+      onConfirm: async () => {
+        const updated = userProfile.familyMembers.filter((m: string) => m !== member);
+        try {
+          await updateDoc(doc(db, 'users', user.uid), { familyMembers: updated });
+        } catch (error) {
+          handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+        }
+        setConfirmModal(null);
+      }
+    });
   };
 
   const handleAddCategory = async (type: 'income' | 'expense') => {
@@ -99,14 +122,33 @@ const SettingsPage: React.FC = () => {
   const handleAddFixed = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !userProfile) return;
+    
+    const amountNum = parseFloat(fixedForm.amount);
+    const dayNum = parseInt(fixedForm.dayOfMonth);
+    
+    if (isNaN(amountNum) || amountNum <= 0) {
+      setAlertModal({ title: t('error'), message: 'Please enter a valid amount' });
+      return;
+    }
+    
+    if (isNaN(dayNum) || dayNum < 1 || dayNum > 31) {
+      setAlertModal({ title: t('error'), message: 'Please enter a valid day of month (1-31)' });
+      return;
+    }
+
+    if (!fixedForm.category) {
+      setAlertModal({ title: t('error'), message: 'Please select a category' });
+      return;
+    }
+
     try {
       const data = {
         userId: user.uid,
-        amount: parseFloat(fixedForm.amount),
+        amount: amountNum,
         type: fixedForm.type,
         category: fixedForm.category,
         description: fixedForm.description,
-        dayOfMonth: parseInt(fixedForm.dayOfMonth),
+        dayOfMonth: dayNum,
         updatedAt: serverTimestamp()
       };
 
@@ -224,50 +266,120 @@ const SettingsPage: React.FC = () => {
     reader.readAsText(file);
   };
 
-  const generatePDF = () => {
+  const generatePDF = async () => {
     const doc = new jsPDF() as any;
     
-    // Add Logo (Simple blue square with AH)
-    doc.setFillColor(59, 130, 246); // Blue-600
-    doc.roundedRect(14, 10, 15, 15, 3, 3, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text('AH', 17.5, 20);
-
-    // Header Text
-    doc.setTextColor(30, 41, 59); // Slate-800
-    doc.setFontSize(18);
-    doc.text('Amar Hisab - Monthly Report', 35, 20);
+    // Create a temporary element for the header to capture with html2canvas
+    const headerEl = document.createElement('div');
+    headerEl.style.position = 'absolute';
+    headerEl.style.left = '-9999px';
+    headerEl.style.top = '-9999px';
+    headerEl.style.width = '800px';
+    headerEl.style.padding = '40px';
+    headerEl.style.backgroundColor = 'white';
+    headerEl.style.fontFamily = '"Anek Bangla", sans-serif';
     
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(100, 116, 139); // Slate-500
-    doc.text(`User: ${user?.displayName || user?.email}`, 14, 35);
-    doc.text(`Date: ${new Date().toLocaleDateString()}`, 14, 40);
+    headerEl.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 20px; border-bottom: 2px solid #3b82f6; padding-bottom: 20px;">
+        <img src="https://i.postimg.cc/mD3mX6Xz/logo.png" style="width: 60px; height: 60px; border-radius: 12px;" />
+        <div>
+          <h1 style="font-size: 32px; color: #1e293b; margin: 0;">আয় ব্যায়ের গুষ্টিমারি</h1>
+          <p style="font-size: 14px; color: #64748b; margin: 5px 0 0 0;">Monthly Financial Statement</p>
+        </div>
+      </div>
+      <div style="margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 14px; color: #475569;">
+        <div><strong>User:</strong> ${userProfile?.displayName || user?.displayName}</div>
+        <div><strong>Date:</strong> ${new Date().toLocaleDateString()}</div>
+        <div><strong>Mobile:</strong> ${userProfile?.phoneNumber || 'N/A'}</div>
+        <div><strong>Email:</strong> ${userProfile?.email || user?.email}</div>
+      </div>
+    `;
+    
+    document.body.appendChild(headerEl);
+    
+    // Wait for the logo image to load
+    const logoImg = headerEl.querySelector('img');
+    if (logoImg) {
+      await new Promise((resolve) => {
+        if (logoImg.complete) resolve(null);
+        else {
+          logoImg.onload = () => resolve(null);
+          logoImg.onerror = () => resolve(null);
+        }
+      });
+    }
+    
+    try {
+      const html2canvas = (await import('html2canvas')).default;
+      const canvas = await html2canvas(headerEl, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        onclone: (clonedDoc) => {
+          // Remove all style and link tags to avoid oklch parsing errors from Tailwind v4
+          const styles = clonedDoc.querySelectorAll('style, link[rel="stylesheet"]');
+          styles.forEach(s => {
+            // Keep Google Fonts but remove everything else (especially Tailwind which uses oklch)
+            const isGoogleFont = s.tagName === 'LINK' && (s as HTMLLinkElement).href?.includes('fonts.googleapis.com');
+            if (!isGoogleFont) {
+              s.remove();
+            }
+          });
+        }
+      });
+      const imgData = canvas.toDataURL('image/png');
+      
+      // Add the header image to PDF
+      const imgWidth = 180;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      doc.addImage(imgData, 'PNG', 15, 10, imgWidth, imgHeight);
 
-    const tableData = transactions.map(tx => [
-      tx.date && typeof tx.date.toDate === 'function' ? tx.date.toDate().toLocaleDateString() : 'N/A',
-      tx.category,
-      tx.type.toUpperCase(),
-      tx.amount.toFixed(2),
-      tx.note || tx.familyMember
-    ]);
+      const tableData = transactions.map(tx => [
+        tx.date && typeof tx.date.toDate === 'function' ? tx.date.toDate().toLocaleDateString() : 'N/A',
+        tx.category,
+        tx.type.toUpperCase(),
+        tx.amount.toFixed(2),
+        tx.note || tx.familyMember || ''
+      ]);
 
-    autoTable(doc, {
-      startY: 45,
-      head: [['Date', 'Category', 'Type', 'Amount', 'Note/Member']],
-      body: tableData,
-      headStyles: { fillColor: [59, 130, 246] },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-    });
+      autoTable(doc, {
+        startY: 10 + imgHeight + 10,
+        head: [['Date', 'Category', 'Type', 'Amount', 'Note/Member']],
+        body: tableData,
+        headStyles: { fillColor: [59, 130, 246] },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        styles: { font: 'helvetica' }
+      });
 
-    doc.save(`amar-hisab-report-${new Date().toISOString().split('T')[0]}.pdf`);
+      doc.save(`amar-hisab-report-${new Date().toISOString().split('T')[0]}.pdf`);
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+    } finally {
+      document.body.removeChild(headerEl);
+    }
+  };
+
+  const resetOnboarding = async () => {
+    if (!user) return;
+    try {
+      await updateDoc(doc(db, 'users', user.uid), { onboardingCompleted: false });
+      window.location.reload();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+    }
   };
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
-      <h2 className="text-3xl font-bold text-slate-800">{t('settings')}</h2>
+      <div className="flex justify-between items-center">
+        <h2 className="text-3xl font-bold text-slate-800 dark:text-white">{t('settings')}</h2>
+        <button
+          onClick={resetOnboarding}
+          className="text-xs bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400 px-3 py-1 rounded-lg hover:bg-red-100 hover:text-red-600 transition-all"
+        >
+          Reset Onboarding (Test)
+        </button>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Language & Profile */}
@@ -398,16 +510,9 @@ const SettingsPage: React.FC = () => {
                 {member}
                 {member !== 'Self' && (
                   <button 
-                    onClick={async () => {
-                      if (!userProfile?.familyMembers) return;
-                      const updated = userProfile.familyMembers.filter((m: string) => m !== member);
-                      try {
-                        await updateDoc(doc(db, 'users', user!.uid), { familyMembers: updated });
-                      } catch (error) {
-                        handleFirestoreError(error, OperationType.UPDATE, `users/${user!.uid}`);
-                      }
-                    }}
-                    className="hover:text-red-500"
+                    onClick={() => handleRemoveMember(member)}
+                    className="hover:text-red-500 transition-colors"
+                    title={t('remove')}
                   >
                     <X className="w-4 h-4" />
                   </button>

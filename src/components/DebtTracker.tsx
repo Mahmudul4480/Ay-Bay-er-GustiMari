@@ -160,7 +160,6 @@ const DebtTracker: React.FC = () => {
       // 2. Delete associated transactions to revert balance
       const q = query(
         collection(db, 'transactions'), 
-        where('userId', '==', user!.uid),
         where('debtId', '==', debtId)
       );
       
@@ -172,14 +171,16 @@ const DebtTracker: React.FC = () => {
         return;
       }
 
-      const deletePromises = querySnapshot.docs.map(d => {
-        try {
-          return deleteDoc(d.ref);
-        } catch (error) {
-          handleFirestoreError(error, OperationType.DELETE, `transactions/${d.id}`);
-          return Promise.resolve();
-        }
-      });
+      const deletePromises = querySnapshot.docs
+        .filter(d => d.data().userId === user!.uid)
+        .map(d => {
+          try {
+            return deleteDoc(d.ref);
+          } catch (error) {
+            handleFirestoreError(error, OperationType.DELETE, `transactions/${d.id}`);
+            return Promise.resolve();
+          }
+        });
       await Promise.all(deletePromises);
       setDeleteConfirmId(null);
     } catch (error) {
@@ -226,7 +227,7 @@ const DebtTracker: React.FC = () => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <h2 className="text-3xl font-bold text-slate-800 dark:text-white">{t('netDebt')}</h2>
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-1 shadow-sm">
+          <div className="flex items-center neon-card p-1">
             <button
               onClick={() => setFilterStatus('all')}
               className={cn(
@@ -258,7 +259,7 @@ const DebtTracker: React.FC = () => {
 
           <button
             onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
-            className="flex items-center gap-2 bg-white dark:bg-slate-800 py-3 px-4 rounded-2xl font-bold text-slate-600 dark:text-slate-300 border border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all shadow-sm"
+            className="flex items-center gap-2 neon-card py-3 px-4 font-bold text-slate-600 dark:text-slate-300 transition-all"
           >
             {sortOrder === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />}
             {t('dueDate')}
@@ -275,16 +276,16 @@ const DebtTracker: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-        <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
+        <div className="neon-card p-6">
           <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">{t('lent')}</p>
           <p className="text-2xl font-bold text-green-600 dark:text-green-400">{formatCurrency(totalLent, language)}</p>
         </div>
-        <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
+        <div className="neon-card p-6">
           <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">{t('borrowed')}</p>
           <p className="text-2xl font-bold text-red-600 dark:text-red-400">{formatCurrency(totalBorrowed, language)}</p>
         </div>
         <div className={cn(
-          "p-6 rounded-3xl shadow-sm border transition-colors",
+          "neon-card p-6",
           netDebt >= 0 
             ? "bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-900/30" 
             : "bg-orange-50 dark:bg-orange-900/20 border-orange-100 dark:border-orange-900/30"
@@ -307,7 +308,7 @@ const DebtTracker: React.FC = () => {
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             className={cn(
-              "bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 flex flex-col gap-4 relative overflow-hidden transition-colors",
+              "neon-card p-6 flex flex-col gap-4 relative overflow-hidden",
               debt.status === 'paid' && "opacity-80"
             )}
           >

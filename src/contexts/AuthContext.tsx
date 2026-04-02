@@ -43,6 +43,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               photoURL: user.photoURL,
               language: 'en',
               budgetLimit: 0,
+              phoneNumber: '',
+              onboardingCompleted: false,
               familyMembers: ['Self'],
               incomeCategories: ['Salary', 'Business', 'Gift', 'Investment', 'Other'],
               expenseCategories: ['Food', 'Rent', 'Utilities', 'Transport', 'Entertainment', 'Health', 'Education', 'Shopping', 'Other'],

@@ -47,7 +47,7 @@ const TransactionList: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-white dark:bg-slate-800 p-4 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
+      <div className="flex flex-col md:flex-row gap-4 items-center justify-between neon-card p-4">
         <div className="relative flex-1 w-full">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
           <input
@@ -87,7 +87,7 @@ const TransactionList: React.FC = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                className="bg-white dark:bg-slate-800 p-5 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-all hover:shadow-md group"
+                className="neon-card p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 group"
               >
                 <div className="flex items-center gap-4">
                   <div className={cn(

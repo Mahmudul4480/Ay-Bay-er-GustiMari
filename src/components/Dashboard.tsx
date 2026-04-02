@@ -3,7 +3,7 @@ import { useTransactions } from '../hooks/useTransactions';
 import { useLocalization } from '../contexts/LocalizationContext';
 import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency, cn } from '../lib/utils';
-import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, LineChart, Line, CartesianGrid } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, LineChart, Line, CartesianGrid, Brush } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
 import { TrendingUp, TrendingDown, Wallet, CreditCard, AlertTriangle, Trash2, PieChart as PieChartIcon, Edit2, ArrowRight, X } from 'lucide-react';
 import TransactionForm from './TransactionForm';
@@ -155,8 +155,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
               else if (stat.id === 'netDebt' && onTabChange) onTabChange('debts');
             }}
             className={cn(
-              "bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 flex items-center gap-4 transition-colors",
-              (stat.id === 'balance' || stat.id === 'income' || stat.id === 'expense' || stat.id === 'netDebt') && "cursor-pointer hover:shadow-md transition-shadow active:scale-95"
+              "neon-card p-6 flex items-center gap-4 transition-all",
+              (stat.id === 'balance' || stat.id === 'income' || stat.id === 'expense' || stat.id === 'netDebt') && "cursor-pointer active:scale-95"
             )}
           >
             <div className={cn("p-4 rounded-2xl", stat.bg, stat.bg.includes('blue') && 'dark:bg-blue-900/20', stat.bg.includes('green') && 'dark:bg-green-900/20', stat.bg.includes('red') && 'dark:bg-red-900/20', stat.bg.includes('orange') && 'dark:bg-orange-900/20', stat.bg.includes('slate') && 'dark:bg-slate-700')}>
@@ -174,7 +174,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors lg:col-span-2"
+          className="neon-card p-8 lg:col-span-2"
         >
           <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-6">Income & Expense Trends</h3>
           <div className="h-80">
@@ -194,6 +194,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                   tickFormatter={(value) => `৳${value}`}
                 />
                 <Tooltip 
+                  formatter={(value: number) => [formatCurrency(value, language), '']}
                   contentStyle={{ 
                     borderRadius: '16px', 
                     border: 'none', 
@@ -201,15 +202,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                     backgroundColor: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
                     color: document.documentElement.classList.contains('dark') ? '#fff' : '#000'
                   }} 
+                  itemStyle={{ fontWeight: 'bold' }}
                 />
-                <Legend />
+                <Legend verticalAlign="top" height={36}/>
                 <Line 
                   type="monotone" 
                   dataKey="income" 
                   stroke="#10b981" 
                   strokeWidth={3} 
                   dot={{ r: 4, fill: '#10b981' }}
-                  activeDot={{ r: 6 }}
+                  activeDot={{ r: 6, strokeWidth: 2, stroke: '#fff' }}
                   name={t('income')} 
                 />
                 <Line 
@@ -218,8 +220,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                   stroke="#ef4444" 
                   strokeWidth={3} 
                   dot={{ r: 4, fill: '#ef4444' }}
-                  activeDot={{ r: 6 }}
+                  activeDot={{ r: 6, strokeWidth: 2, stroke: '#fff' }}
                   name={t('expense')} 
+                />
+                <Brush 
+                  dataKey="name" 
+                  height={30} 
+                  stroke="#3b82f6" 
+                  fill={document.documentElement.classList.contains('dark') ? '#1e293b' : '#f8fafc'}
+                  travellerWidth={10}
                 />
               </LineChart>
             </ResponsiveContainer>
@@ -231,7 +240,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors"
+          className="neon-card p-8"
         >
           <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-6">{t('monthlyExpense')} {t('category')}</h3>
           <div className="h-64">
@@ -268,7 +277,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors"
+          className="neon-card p-8"
         >
           <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-6">{t('expenseByMember')}</h3>
           <div className="h-64">
@@ -307,7 +316,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors"
+          className="neon-card p-8"
         >
           <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-6">{t('income')} vs {t('expense')}</h3>
           <div className="h-64">
@@ -335,7 +344,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors"
+          className="neon-card p-8"
         >
           <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-6">{t('incomeByMember')}</h3>
           <div className="h-64">
@@ -370,7 +379,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         </motion.div>
       </div>
 
-      <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
+      <div className="neon-card p-8">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-xl font-bold text-slate-800 dark:text-white">{t('dashboard')} - Recent Transactions</h3>
           {onTabChange && (

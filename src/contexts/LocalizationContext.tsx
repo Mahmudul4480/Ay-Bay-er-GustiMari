@@ -39,7 +39,7 @@ export const translations: Translations = {
   dueDate: { en: 'Due Date', bn: 'পরিশোধের তারিখ' },
   status: { en: 'Status', bn: 'অবস্থা' },
   paid: { en: 'Paid', bn: 'পরিশোধিত' },
-  unpaid: { en: 'Unpaid', bn: 'অপরিষোধিত' },
+  unpaid: { en: 'Unpaid', bn: 'অপরিশোধিত' },
   familyMembers: { en: 'Family Members', bn: 'পরিবারের সদস্য' },
   addMember: { en: 'Add Member', bn: 'সদস্য যোগ করুন' },
   addCategory: { en: 'Add Category', bn: 'বিভাগ যোগ করুন' },
@@ -72,6 +72,9 @@ export const translations: Translations = {
   all: { en: 'All', bn: 'সব' },
   search: { en: 'Search', bn: 'খুঁজুন' },
   noTransactions: { en: 'No transactions found', bn: 'কোন লেনদেন পাওয়া যায়নি' },
+  incomeSource: { en: 'Income Source', bn: 'আয়ের উৎস' },
+  expenseSource: { en: 'Expense Source', bn: 'ব্যয়ের উৎস' },
+  sourceName: { en: 'Source Name', bn: 'উৎসের নাম' },
 };
 
 interface LocalizationContextType {
