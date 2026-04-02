@@ -63,7 +63,8 @@ const AppContent: React.FC = () => {
         if (error.code === 'auth/popup-blocked') {
           message = "Popup was blocked by your browser. Please allow popups for this site.";
         } else if (error.code === 'auth/unauthorized-domain') {
-          message = "This domain is not authorized for Firebase Auth. Please add this domain to the 'Authorized domains' list in the Firebase Console.";
+          const currentDomain = window.location.hostname;
+          message = `This domain (${currentDomain}) is not authorized for Firebase Auth. Please add it to the 'Authorized domains' list in the Firebase Console.`;
         } else if (error.message) {
           message = error.message;
         }
