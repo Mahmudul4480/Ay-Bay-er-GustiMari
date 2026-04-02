@@ -5,14 +5,12 @@ import cron from "node-cron";
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import admin from 'firebase-admin';
+import firebaseConfig from './firebase-applet-config.json';
 
-// Initialize Firebase Admin (using environment variables if available, or just placeholder for now)
-// In this environment, we should ideally use the same config as client or service account.
-// For the sake of this applet, we'll assume the admin SDK can be initialized.
-// Note: In a real app, you'd need a service account key.
+// Initialize Firebase Admin
 if (!admin.apps.length) {
   initializeApp({
-    projectId: "gen-lang-client-0020867919",
+    projectId: firebaseConfig.projectId,
   });
 }
 

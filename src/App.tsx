@@ -1,7 +1,7 @@
 import React from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LocalizationProvider, useLocalization } from './contexts/LocalizationContext';
-import { loginWithGoogle, logout, isInAppBrowser } from './firebaseConfig';
+import { loginWithGoogle, logout, isInAppBrowser, isConfigValid } from './firebaseConfig';
 import { LogIn, LogOut, LayoutDashboard, CreditCard, Settings, Plus, Menu, X, Globe, Sun, Moon, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -91,6 +91,22 @@ const AppContent: React.FC = () => {
             <p className="text-slate-300 font-medium text-sm">Personal Finance & Debt Manager</p>
           </div>
 
+          {!isConfigValid && (
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-red-500/20 border border-red-500/30 p-4 rounded-2xl flex items-start gap-3 text-left"
+            >
+              <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-xs font-bold text-red-100">Configuration Missing</p>
+                <p className="text-[10px] text-red-200 leading-relaxed">
+                  Firebase environment variables are not set. Please configure them in the Settings menu to enable login.
+                </p>
+              </div>
+            </motion.div>
+          )}
+
           {isAppBrowser && (
             <motion.div 
               initial={{ opacity: 0, scale: 0.9 }}
@@ -108,7 +124,11 @@ const AppContent: React.FC = () => {
 
           <button
             onClick={loginWithGoogle}
-            className="w-full flex items-center justify-center gap-3 bg-white/90 backdrop-blur-sm border border-white/20 py-4 px-6 rounded-2xl font-bold text-slate-900 hover:bg-white transition-all shadow-md hover:shadow-lg active:scale-95 group"
+            disabled={!isConfigValid}
+            className={cn(
+              "w-full flex items-center justify-center gap-3 bg-white/90 backdrop-blur-sm border border-white/20 py-4 px-6 rounded-2xl font-bold text-slate-900 transition-all shadow-md active:scale-95 group",
+              !isConfigValid ? "opacity-50 cursor-not-allowed" : "hover:bg-white hover:shadow-lg"
+            )}
           >
             <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-6 h-6 group-hover:scale-110 transition-transform" />
             {t('loginWithGoogle')}
