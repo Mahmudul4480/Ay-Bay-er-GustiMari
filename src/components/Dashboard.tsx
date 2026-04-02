@@ -3,7 +3,7 @@ import { useTransactions } from '../hooks/useTransactions';
 import { useLocalization } from '../contexts/LocalizationContext';
 import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency, cn } from '../lib/utils';
-import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, LineChart, Line, CartesianGrid } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, LineChart, Line, CartesianGrid, Brush } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
 import { TrendingUp, TrendingDown, Wallet, CreditCard, AlertTriangle, Trash2, PieChart as PieChartIcon, Edit2, ArrowRight, X } from 'lucide-react';
 import TransactionForm from './TransactionForm';
@@ -194,6 +194,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                   tickFormatter={(value) => `৳${value}`}
                 />
                 <Tooltip 
+                  formatter={(value: number) => [formatCurrency(value, language), '']}
                   contentStyle={{ 
                     borderRadius: '16px', 
                     border: 'none', 
@@ -201,15 +202,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                     backgroundColor: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
                     color: document.documentElement.classList.contains('dark') ? '#fff' : '#000'
                   }} 
+                  itemStyle={{ fontWeight: 'bold' }}
                 />
-                <Legend />
+                <Legend verticalAlign="top" height={36}/>
                 <Line 
                   type="monotone" 
                   dataKey="income" 
                   stroke="#10b981" 
                   strokeWidth={3} 
                   dot={{ r: 4, fill: '#10b981' }}
-                  activeDot={{ r: 6 }}
+                  activeDot={{ r: 6, strokeWidth: 2, stroke: '#fff' }}
                   name={t('income')} 
                 />
                 <Line 
@@ -218,8 +220,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                   stroke="#ef4444" 
                   strokeWidth={3} 
                   dot={{ r: 4, fill: '#ef4444' }}
-                  activeDot={{ r: 6 }}
+                  activeDot={{ r: 6, strokeWidth: 2, stroke: '#fff' }}
                   name={t('expense')} 
+                />
+                <Brush 
+                  dataKey="name" 
+                  height={30} 
+                  stroke="#3b82f6" 
+                  fill={document.documentElement.classList.contains('dark') ? '#1e293b' : '#f8fafc'}
+                  travellerWidth={10}
                 />
               </LineChart>
             </ResponsiveContainer>
