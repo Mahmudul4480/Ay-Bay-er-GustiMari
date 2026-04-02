@@ -2,7 +2,7 @@ import React from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LocalizationProvider, useLocalization } from './contexts/LocalizationContext';
 import { loginWithGoogle, logout, isInAppBrowser, isConfigValid } from './firebaseConfig';
-import { LogIn, LogOut, LayoutDashboard, CreditCard, Settings, Plus, Menu, X, Globe, Sun, Moon, AlertTriangle } from 'lucide-react';
+import { LogIn, LogOut, LayoutDashboard, CreditCard, Settings, Plus, Menu, X, Globe, Sun, Moon, AlertTriangle, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 import Dashboard from './components/Dashboard';
@@ -11,6 +11,7 @@ import TransactionList from './components/TransactionList';
 import DebtTracker from './components/DebtTracker';
 import SettingsPage from './components/SettingsPage';
 import Onboarding from './components/Onboarding';
+import AdminDashboard from './pages/AdminDashboard';
 
 const AppContent: React.FC = () => {
   const { user, loading, userProfile } = useAuth();
@@ -144,21 +145,6 @@ const AppContent: React.FC = () => {
             </motion.div>
           )}
 
-          {isAppBrowser && (
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="bg-amber-500/20 border border-amber-500/30 p-4 rounded-2xl flex items-start gap-3 text-left"
-            >
-              <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-              <p className="text-xs text-amber-100 leading-relaxed">
-                {language === 'bn' 
-                  ? 'আপনি একটি ইন-অ্যাপ ব্রাউজার ব্যবহার করছেন। লগইন করতে সমস্যা হলে, অনুগ্রহ করে এই লিংকটি Chrome বা Safari-তে ওপেন করুন।' 
-                  : 'You are using an in-app browser. If login fails, please open this link in Chrome or Safari for a better experience.'}
-              </p>
-            </motion.div>
-          )}
-
           <button
             onClick={handleLogin}
             disabled={!isConfigValid}
@@ -170,6 +156,21 @@ const AppContent: React.FC = () => {
             <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-6 h-6 group-hover:scale-110 transition-transform" />
             {t('loginWithGoogle')}
           </button>
+
+          {isAppBrowser && (
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-amber-500/20 border border-amber-500/30 p-4 rounded-2xl flex items-start gap-3 text-left"
+            >
+              <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-100 leading-relaxed">
+                {language === 'bn' 
+                  ? 'একটি নিরবচ্ছিন্ন লগইনের জন্য, অনুগ্রহ করে আপনার ফোনের ডিফল্ট ব্রাউজারে (Chrome/Safari) এই লিংকটি ওপেন করুন (উপরে ডানদিকে ৩-ডট মেনুর মাধ্যমে)।' 
+                  : 'For a seamless login, please open this link in your phone\'s default browser (Chrome/Safari) via the 3-dot menu at the top right.'}
+              </p>
+            </motion.div>
+          )}
 
           <div className="flex justify-center gap-6 pt-2">
             <button 
@@ -209,6 +210,10 @@ const AppContent: React.FC = () => {
     { id: 'transactions', label: t('transactions'), icon: CreditCard },
     { id: 'settings', label: t('settings'), icon: Settings },
   ];
+
+  if (userProfile?.role === 'admin') {
+    tabs.push({ id: 'admin', label: 'Admin', icon: Users });
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col md:flex-row transition-colors">
@@ -350,6 +355,7 @@ const AppContent: React.FC = () => {
         {activeTab === 'transactions' && <TransactionList />}
         {activeTab === 'debts' && <DebtTracker />}
         {activeTab === 'settings' && <SettingsPage />}
+        {activeTab === 'admin' && userProfile?.role === 'admin' && <AdminDashboard onBack={() => setActiveTab('dashboard')} />}
       </main>
 
       {/* Floating Add Button */}
