@@ -335,7 +335,11 @@ const SettingsPage: React.FC = () => {
       doc.addImage(imgData, 'PNG', 15, 10, imgWidth, imgHeight);
 
       const tableData = transactions.map(tx => [
-        tx.date && typeof tx.date.toDate === 'function' ? tx.date.toDate().toLocaleDateString() : 'N/A',
+        tx.date ? (
+          typeof tx.date.toDate === 'function' 
+            ? tx.date.toDate().toLocaleDateString() 
+            : (tx.date instanceof Date ? tx.date.toLocaleDateString() : 'N/A')
+        ) : 'N/A',
         tx.category,
         tx.type.toUpperCase(),
         tx.amount.toFixed(2),

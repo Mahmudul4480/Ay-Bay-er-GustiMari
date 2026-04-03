@@ -405,9 +405,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
               {transactions.slice(0, 5).map((tx) => (
                 <tr key={tx.id} className="border-b border-slate-50 dark:border-slate-700/50 last:border-0 group">
                   <td className="py-4 text-slate-600 dark:text-slate-400">
-                    {tx.date && typeof tx.date.toDate === 'function' 
-                      ? tx.date.toDate().toLocaleDateString() 
-                      : 'N/A'}
+                    {tx.date ? (
+                      typeof tx.date.toDate === 'function' 
+                        ? tx.date.toDate().toLocaleDateString() 
+                        : (tx.date instanceof Date ? tx.date.toLocaleDateString() : 'N/A')
+                    ) : 'N/A'}
                   </td>
                   <td className="py-4 font-medium text-slate-800 dark:text-white">{tx.category}</td>
                   <td className="py-4 text-slate-500 dark:text-slate-400">{tx.familyMember}</td>

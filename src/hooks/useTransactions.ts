@@ -15,6 +15,8 @@ export interface Transaction {
   familyMember: string;
   userId: string;
   debtId?: string;
+  createdAt?: Timestamp;
+  updatedAt?: Timestamp;
 }
 
 export interface Debt {
@@ -76,18 +78,38 @@ export const useTransactions = () => {
 
     const unsubscribeTransactions = onSnapshot(qTransactions, (snapshot) => {
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transaction));
-      // Sort by date desc
+      
+      const getTime = (val: any) => {
+        if (!val) return 0;
+        if (typeof val.toMillis === 'function') return val.toMillis();
+        if (val instanceof Date) return val.getTime();
+        if (typeof val === 'number') return val;
+        const d = new Date(val);
+        return isNaN(d.getTime()) ? 0 : d.getTime();
+      };
+
+      // Sort by date desc, then by createdAt/updatedAt desc
       docs.sort((a, b) => {
-        const getTime = (val: any) => {
-          if (!val) return 0;
-          if (typeof val.toMillis === 'function') return val.toMillis();
-          if (val instanceof Date) return val.getTime();
-          if (typeof val === 'number') return val;
-          const d = new Date(val);
-          return isNaN(d.getTime()) ? 0 : d.getTime();
+        const timeA = getTime(a.date);
+        const timeB = getTime(b.date);
+        
+        if (timeA !== timeB) {
+          return timeB - timeA;
+        }
+        
+        // If dates are the same, sort by creation time
+        // Handle null server timestamps (newly added docs) by treating them as "now"
+        const getCreatedTime = (val: any) => {
+          if (!val) return Date.now() + 1000000; // Future time for optimistic updates
+          return getTime(val);
         };
-        return getTime(b.date) - getTime(a.date);
+        
+        const createdA = getCreatedTime(a.createdAt || a.updatedAt);
+        const createdB = getCreatedTime(b.createdAt || b.updatedAt);
+        
+        return createdB - createdA;
       });
+      
       setTransactions(docs);
       transactionsLoaded = true;
       checkLoading();

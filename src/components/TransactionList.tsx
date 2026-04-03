@@ -109,7 +109,11 @@ const TransactionList: React.FC = () => {
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500 dark:text-slate-400">
                       <div className="flex items-center gap-1">
                         <Calendar className="w-4 h-4" />
-                        {tx.date.toDate().toLocaleDateString()}
+                        {tx.date ? (
+                          typeof tx.date.toDate === 'function' 
+                            ? tx.date.toDate().toLocaleDateString() 
+                            : (tx.date instanceof Date ? tx.date.toLocaleDateString() : 'N/A')
+                        ) : 'N/A'}
                       </div>
                       {tx.note && (
                         <div className="flex items-center gap-1 italic">

@@ -131,10 +131,11 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   }, [users]);
 
   const exportToCSV = () => {
-    const headers = ['Name', 'Email', 'Top Category', 'Total Income', 'Total Expense', 'Balance'];
+    const headers = ['Name', 'Email', 'Mobile', 'Top Category', 'Total Income', 'Total Expense', 'Balance'];
     const data = filteredUsers.map(u => [
       u.displayName || 'N/A',
       u.email,
+      u.phoneNumber || 'N/A',
       u.topCategory,
       u.totalIncome,
       u.totalExpense,
@@ -340,6 +341,9 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                       <div>
                         <p className="font-bold text-slate-800 dark:text-white">{user.displayName || 'Anonymous'}</p>
                         <p className="text-xs text-slate-500 dark:text-slate-400">{user.email}</p>
+                        {user.phoneNumber && (
+                          <p className="text-[10px] text-blue-500 font-medium mt-0.5">{user.phoneNumber}</p>
+                        )}
                       </div>
                     </div>
                   </td>
