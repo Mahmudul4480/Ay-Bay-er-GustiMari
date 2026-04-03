@@ -5,7 +5,7 @@ import { db } from '../firebaseConfig';
 import { doc, updateDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { motion } from 'motion/react';
-import { X, Save } from 'lucide-react';
+import { X, Save, AlertTriangle } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 import { Transaction } from '../hooks/useTransactions';
@@ -32,19 +32,27 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, initialType,
   const [newMember, setNewMember] = useState('');
   const [isAddingMember, setIsAddingMember] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
     const finalCategory = isAddingCategory ? newCategory : category;
     const finalMember = isAddingMember ? newMember : familyMember;
 
     if (!user || !amount || !finalCategory) {
-      alert(t('fillAllFields'));
+      setError(t('fillAllFields') || 'Please fill all fields');
+      return;
+    }
+
+    const amountNum = parseFloat(amount);
+    if (isNaN(amountNum)) {
+      setError('Please enter a valid amount');
       return;
     }
 
     if (!userProfile) {
-      alert(t('profileLoading'));
+      setError(t('profileLoading') || 'Profile loading...');
       return;
     }
 
@@ -54,34 +62,41 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, initialType,
       let savedMember = finalMember;
 
       // Update user profile if new category/member added
-      if (isAddingCategory && newCategory) {
+      if (isAddingCategory && newCategory.trim()) {
         const field = type === 'income' ? 'incomeCategories' : 'expenseCategories';
         const currentCategories = userProfile[field] || [];
-        if (!currentCategories.includes(newCategory)) {
-          const updatedCategories = [...currentCategories, newCategory];
+        const trimmed = newCategory.trim();
+        if (!currentCategories.includes(trimmed)) {
+          const updatedCategories = [...currentCategories, trimmed];
           try {
             await updateDoc(doc(db, 'users', user.uid), { [field]: updatedCategories });
-          } catch (error) {
-            handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+            savedCategory = trimmed;
+          } catch (err) {
+            console.error('Error updating categories:', err);
+            // Continue with the typed category even if update fails
+            savedCategory = trimmed;
           }
         }
       }
 
-      if (isAddingMember && newMember) {
+      if (isAddingMember && newMember.trim()) {
         const currentMembers = userProfile.familyMembers || ['Self'];
-        if (!currentMembers.includes(newMember)) {
-          const updatedMembers = [...currentMembers, newMember];
+        const trimmed = newMember.trim();
+        if (!currentMembers.includes(trimmed)) {
+          const updatedMembers = [...currentMembers, trimmed];
           try {
             await updateDoc(doc(db, 'users', user.uid), { familyMembers: updatedMembers });
-          } catch (error) {
-            handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+            savedMember = trimmed;
+          } catch (err) {
+            console.error('Error updating members:', err);
+            savedMember = trimmed;
           }
         }
       }
 
       const transactionData = {
         userId: user.uid,
-        amount: parseFloat(amount),
+        amount: amountNum,
         type,
         category: savedCategory,
         date: new Date(date),
@@ -99,12 +114,13 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, initialType,
             createdAt: serverTimestamp(),
           });
         }
-      } catch (error) {
-        handleFirestoreError(error, transaction ? OperationType.UPDATE : OperationType.CREATE, transaction ? `transactions/${transaction.id}` : 'transactions');
+        onClose();
+      } catch (err) {
+        handleFirestoreError(err, transaction ? OperationType.UPDATE : OperationType.CREATE, transaction ? `transactions/${transaction.id}` : 'transactions');
       }
-      onClose();
-    } catch (error) {
-      console.error('Error saving transaction:', error);
+    } catch (err: any) {
+      console.error('Error saving transaction:', err);
+      setError(err.message || 'An error occurred while saving');
     } finally {
       setIsSubmitting(false);
     }
@@ -130,6 +146,13 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, initialType,
             <X className="w-6 h-6" />
           </button>
         </div>
+
+        {error && (
+          <div className="mx-8 mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 rounded-2xl flex items-center gap-3 text-red-600 dark:text-red-400 text-sm">
+            <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+            <p className="font-medium">{error}</p>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="p-8 space-y-6">
           <div className="flex p-1 bg-slate-100 dark:bg-slate-700 rounded-2xl">

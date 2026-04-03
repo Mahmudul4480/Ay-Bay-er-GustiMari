@@ -7,7 +7,7 @@ import { collection, addDoc, updateDoc, doc, serverTimestamp, deleteDoc, query, 
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Trash2, CheckCircle, Clock, User, DollarSign, Calendar, X, Phone, Filter, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, Clock, User, DollarSign, Calendar, X, Phone, Filter, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle } from 'lucide-react';
 
 import { convertBengaliToAscii, sanitizeDecimal } from '../lib/numberUtils';
 
@@ -17,6 +17,7 @@ const DebtTracker: React.FC = () => {
   const { user } = useAuth();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<'all' | 'paid' | 'unpaid'>('all');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
@@ -31,7 +32,17 @@ const DebtTracker: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !formData.personName || !formData.amount) return;
+    setError(null);
+    if (!user || !formData.personName || !formData.amount) {
+      setError(t('fillAllFields') || 'Please fill all fields');
+      return;
+    }
+
+    const amountNum = parseFloat(formData.amount);
+    if (isNaN(amountNum)) {
+      setError('Please enter a valid amount');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -41,7 +52,7 @@ const DebtTracker: React.FC = () => {
         debtRef = await addDoc(collection(db, 'debts'), {
           userId: user.uid,
           personName: formData.personName,
-          amount: parseFloat(formData.amount),
+          amount: amountNum,
           type: formData.type,
           description: formData.description,
           dueDate: new Date(formData.dueDate),
@@ -49,28 +60,27 @@ const DebtTracker: React.FC = () => {
           phoneNumber: formData.phoneNumber,
           createdAt: serverTimestamp(),
         });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.CREATE, 'debts');
+      } catch (err) {
+        handleFirestoreError(err, OperationType.CREATE, 'debts');
         return;
       }
 
       // 2. Rule A: Instantly adjust balance by creating a transaction
-      // Lending (lent) = Money leaves pocket (expense)
-      // Borrowing (borrowed) = Money enters pocket (income)
       try {
         await addDoc(collection(db, 'transactions'), {
           userId: user.uid,
-          amount: parseFloat(formData.amount),
+          amount: amountNum,
           type: formData.type === 'lent' ? 'expense' : 'income',
           category: formData.type === 'lent' ? 'Debt Given' : 'Debt Taken',
           date: serverTimestamp(),
           note: `${formData.type === 'lent' ? 'Lent to' : 'Borrowed from'} ${formData.personName}`,
           familyMember: 'Self',
           isFixed: false,
-          debtId: debtRef.id // Link to debt for future reference if needed
+          debtId: debtRef.id,
+          createdAt: serverTimestamp()
         });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.CREATE, 'transactions');
+      } catch (err) {
+        handleFirestoreError(err, OperationType.CREATE, 'transactions');
       }
 
       setIsModalOpen(false);
@@ -82,8 +92,9 @@ const DebtTracker: React.FC = () => {
         dueDate: new Date().toISOString().split('T')[0],
         phoneNumber: '',
       });
-    } catch (error) {
-      console.error('Error adding debt:', error);
+    } catch (err: any) {
+      console.error('Error adding debt:', err);
+      setError(err.message || 'An error occurred while saving');
     } finally {
       setIsSubmitting(false);
     }
@@ -416,6 +427,13 @@ const DebtTracker: React.FC = () => {
                   <X className="w-6 h-6" />
                 </button>
               </div>
+
+              {error && (
+                <div className="mx-8 mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 rounded-2xl flex items-center gap-3 text-red-600 dark:text-red-400 text-sm">
+                  <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+                  <p className="font-medium">{error}</p>
+                </div>
+              )}
 
               <form onSubmit={handleSubmit} className="p-8 space-y-6">
                 <div className="flex p-1 bg-slate-100 dark:bg-slate-700 rounded-2xl">

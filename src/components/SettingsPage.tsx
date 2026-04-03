@@ -281,7 +281,7 @@ const SettingsPage: React.FC = () => {
     
     headerEl.innerHTML = `
       <div style="display: flex; align-items: center; gap: 20px; border-bottom: 2px solid #3b82f6; padding-bottom: 20px;">
-        <img src="https://i.postimg.cc/mD3mX6Xz/logo.png" style="width: 60px; height: 60px; border-radius: 12px;" />
+        <img src="https://i.postimg.cc/K8yGqVdy/logo-png.png" style="width: 60px; height: 60px; border-radius: 12px;" />
         <div>
           <h1 style="font-size: 32px; color: #1e293b; margin: 0;">আয় ব্যায়ের গুষ্টিমারি</h1>
           <p style="font-size: 14px; color: #64748b; margin: 5px 0 0 0;">Monthly Financial Statement</p>

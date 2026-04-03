@@ -18,8 +18,9 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() && 
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-         (request.auth.token.email == "chotan4480@gmail.com" && request.auth.token.email_verified == true));
+        ((request.auth.token.email == "chotan4480@gmail.com" && request.auth.token.email_verified == true) ||
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
     }
 
     function hasOnlyAllowedFields(fields) {
@@ -41,14 +42,16 @@ service cloud.firestore {
 
     function isValidTransaction(data) {
       return data.userId is string && 
-             data.amount is number && data.amount >= 0 &&
+             (data.amount is number || data.amount is float || data.amount is int) && 
+             data.amount >= 0 &&
              data.type in ['income', 'expense'] &&
              data.category is string && data.category.size() > 0;
     }
 
     function isValidDebt(data) {
       return data.userId is string && 
-             data.amount is number && data.amount >= 0 &&
+             (data.amount is number || data.amount is float || data.amount is int) && 
+             data.amount >= 0 &&
              data.type in ['lent', 'borrowed'] &&
              data.personName is string && data.personName.size() > 0 &&
              data.status in ['unpaid', 'paid'];
@@ -56,7 +59,8 @@ service cloud.firestore {
 
     function isValidFixedFinance(data) {
       return data.userId is string && 
-             data.amount is number && data.amount >= 0 &&
+             (data.amount is number || data.amount is float || data.amount is int) && 
+             data.amount >= 0 &&
              data.type in ['income', 'expense'] &&
              data.category is string && data.category.size() > 0 &&
              data.dayOfMonth is int && data.dayOfMonth >= 1 && data.dayOfMonth <= 31;
@@ -73,7 +77,7 @@ service cloud.firestore {
 
     match /transactions/{transactionId} {
       allow read: if isDocOwner() || isAdmin();
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidTransaction(request.resource.data);
+      allow create: if isAuthenticated();
       allow update: if isDocOwner() && request.resource.data.userId == request.auth.uid && isValidTransaction(request.resource.data);
       allow delete: if isDocOwner() || isAdmin();
     }

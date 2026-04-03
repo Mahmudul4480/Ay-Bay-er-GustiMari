@@ -63,13 +63,17 @@ const AppContent: React.FC = () => {
         if (error.code === 'auth/popup-blocked') {
           message = "Popup was blocked by your browser. Please allow popups for this site.";
         } else if (error.code === 'auth/unauthorized-domain') {
-          message = "This domain is not authorized for Firebase Auth. Please add this domain to the 'Authorized domains' list in the Firebase Console.";
+          const currentDomain = window.location.hostname;
+          message = `unauthorized-domain:${currentDomain}`;
         } else if (error.message) {
           message = error.message;
         }
         setLoginError(message);
       }
     };
+
+    const isUnauthorizedDomain = loginError?.startsWith('unauthorized-domain:');
+    const domainToAuthorize = isUnauthorizedDomain ? loginError.split(':')[1] : null;
     
     return (
       <div className="h-screen w-screen flex flex-col items-center justify-center bg-gradient-to-br from-indigo-900 via-purple-800 to-slate-900 p-4 transition-colors overflow-hidden relative">
@@ -117,14 +121,34 @@ const AppContent: React.FC = () => {
             <motion.div 
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="bg-red-500/20 border border-red-500/30 p-4 rounded-2xl flex items-start gap-3 text-left"
+              className="bg-red-500/20 border border-red-500/30 p-4 rounded-2xl flex items-start gap-3 text-left w-full"
             >
               <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
-              <div className="space-y-1">
+              <div className="space-y-2 flex-1">
                 <p className="text-xs font-bold text-red-100">Login Error</p>
-                <p className="text-[10px] text-red-200 leading-relaxed">
-                  {loginError}
-                </p>
+                {isUnauthorizedDomain ? (
+                  <div className="space-y-3">
+                    <p className="text-[10px] text-red-200 leading-relaxed">
+                      This domain is not authorized in your Firebase Console. Please add it to the "Authorized domains" list.
+                    </p>
+                    <div className="flex items-center gap-2 bg-black/20 p-2 rounded-lg border border-white/10">
+                      <code className="text-[10px] text-white flex-1 truncate">{domainToAuthorize}</code>
+                      <button 
+                        onClick={() => {
+                          navigator.clipboard.writeText(domainToAuthorize || '');
+                          alert('Domain copied! Now add it to Firebase Console.');
+                        }}
+                        className="text-[10px] bg-white/20 hover:bg-white/30 text-white px-2 py-1 rounded font-bold transition-all"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-red-200 leading-relaxed">
+                    {loginError}
+                  </p>
+                )}
               </div>
             </motion.div>
           )}

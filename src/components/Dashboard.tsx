@@ -25,13 +25,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
   const [deleteConfirmId, setDeleteConfirmId] = React.useState<string | null>(null);
   const [showBalanceBreakdown, setShowBalanceBreakdown] = React.useState(false);
 
-  const regularTransactions = transactions.filter(t => !t.debtId);
-
-  const totalIncome = regularTransactions
+  const totalIncome = transactions
     .filter(t => t.type === 'income')
     .reduce((acc, curr) => acc + curr.amount, 0);
 
-  const totalExpense = regularTransactions
+  const totalExpense = transactions
     .filter(t => t.type === 'expense')
     .reduce((acc, curr) => acc + curr.amount, 0);
 
@@ -43,8 +41,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
     .filter(d => d.type === 'borrowed' && d.status === 'unpaid')
     .reduce((acc, curr) => acc + curr.amount, 0);
 
-  // Formula: Total Balance = (Regular Income - Regular Expenses) - (Money Lent/Paona) + (Money Borrowed/Dena)
-  const balance = (totalIncome - totalExpense) - totalLent + totalBorrowed;
+  // Simple Formula: Total Balance = Total Income - Total Expense
+  // (Since debt transactions already adjust income/expense)
+  const balance = totalIncome - totalExpense;
   const netDebt = totalBorrowed - totalLent;
 
   const deleteTransaction = async (id: string) => {
@@ -73,7 +72,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
     },
   ];
 
-  const categoryData = regularTransactions
+  const categoryData = transactions
     .filter(t => t.type === 'expense')
     .reduce((acc: any[], curr) => {
       const existing = acc.find(a => a.name === curr.category);
@@ -85,7 +84,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
       return acc;
     }, []);
 
-  const memberExpenseData = regularTransactions
+  const memberExpenseData = transactions
     .filter(t => t.type === 'expense')
     .reduce((acc: any[], curr) => {
       const existing = acc.find(a => a.name === curr.familyMember);
@@ -97,7 +96,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
       return acc;
     }, []);
 
-  const memberIncomeData = regularTransactions
+  const memberIncomeData = transactions
     .filter(t => t.type === 'income')
     .reduce((acc: any[], curr) => {
       const existing = acc.find(a => a.name === curr.familyMember);
@@ -111,7 +110,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
 
   const COLORS = ['#3b82f6', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6', '#ec4899'];
 
-  const trendData = regularTransactions.reduce((acc: any[], curr) => {
+  const trendData = transactions.reduce((acc: any[], curr) => {
     const date = curr.date && typeof curr.date.toDate === 'function' ? curr.date.toDate() : new Date();
     const month = date.toLocaleString('default', { month: 'short', year: '2-digit' });
     const existing = acc.find(a => a.name === month);

@@ -78,9 +78,15 @@ export const useTransactions = () => {
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transaction));
       // Sort by date desc
       docs.sort((a, b) => {
-        const dateA = a.date?.toMillis() || 0;
-        const dateB = b.date?.toMillis() || 0;
-        return dateB - dateA;
+        const getTime = (val: any) => {
+          if (!val) return 0;
+          if (typeof val.toMillis === 'function') return val.toMillis();
+          if (val instanceof Date) return val.getTime();
+          if (typeof val === 'number') return val;
+          const d = new Date(val);
+          return isNaN(d.getTime()) ? 0 : d.getTime();
+        };
+        return getTime(b.date) - getTime(a.date);
       });
       setTransactions(docs);
       transactionsLoaded = true;
@@ -95,9 +101,15 @@ export const useTransactions = () => {
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Debt));
       // Sort by dueDate asc
       docs.sort((a, b) => {
-        const dateA = a.dueDate?.toMillis() || 0;
-        const dateB = b.dueDate?.toMillis() || 0;
-        return dateA - dateB;
+        const getTime = (val: any) => {
+          if (!val) return 0;
+          if (typeof val.toMillis === 'function') return val.toMillis();
+          if (val instanceof Date) return val.getTime();
+          if (typeof val === 'number') return val;
+          const d = new Date(val);
+          return isNaN(d.getTime()) ? 0 : d.getTime();
+        };
+        return getTime(a.dueDate) - getTime(b.dueDate);
       });
       setDebts(docs);
       debtsLoaded = true;

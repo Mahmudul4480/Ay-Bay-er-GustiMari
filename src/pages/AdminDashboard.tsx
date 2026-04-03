@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { db } from '../firebaseConfig';
-import { collection, getDocs, query, orderBy, limit, where } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, limit, where } from 'firebase/firestore';
+import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, TrendingUp, TrendingDown, ArrowLeft, User as UserIcon, 
@@ -27,38 +28,33 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [userTransactions, setUserTransactions] = useState<any[]>([]);
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [usersSnap, transactionsSnap] = await Promise.all([
-          getDocs(collection(db, 'users')),
-          getDocs(collection(db, 'transactions'))
-        ]);
-
+    setLoading(true);
+    
+    const unsubscribeUsers = onSnapshot(collection(db, 'users'), (usersSnap) => {
+      const usersList = usersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      
+      const unsubscribeTransactions = onSnapshot(collection(db, 'transactions'), (transactionsSnap) => {
         const transactionsList = transactionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
         setTransactions(transactionsList);
-
-        const usersList = usersSnap.docs.map(doc => {
-          const userData = doc.data();
-          const userTrans = transactionsList.filter((t: any) => t.userId === doc.id);
-          
-          const income = userTrans.filter((t: any) => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
-          const expense = userTrans.filter((t: any) => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
-          const balance = income - expense;
+        
+        const enriched = usersList.map((user: any) => {
+          const userTrans = transactionsList.filter((t: any) => t.userId === user.id);
+          const income = userTrans.filter((t: any) => t.type === 'income').reduce((sum: number, t: any) => sum + (Number(t.amount) || 0), 0);
+          const expense = userTrans.filter((t: any) => t.type === 'expense').reduce((sum: number, t: any) => sum + (Number(t.amount) || 0), 0);
           
           const expenseCategories: Record<string, number> = {};
           userTrans.filter((t: any) => t.type === 'expense').forEach((t: any) => {
-            expenseCategories[t.category] = (expenseCategories[t.category] || 0) + t.amount;
+            expenseCategories[t.category] = (expenseCategories[t.category] || 0) + (Number(t.amount) || 0);
           });
           
           const topCategory = Object.entries(expenseCategories).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A';
           const savingsRate = income > 0 ? ((income - expense) / income) * 100 : 0;
 
           return {
-            id: doc.id,
-            ...userData,
+            ...user,
             totalIncome: income,
             totalExpense: expense,
-            balance,
+            balance: income - expense,
             transactionCount: userTrans.length,
             topCategory,
             savingsRate,
@@ -66,15 +62,20 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           };
         });
 
-        setUsers(usersList);
-      } catch (error) {
-        console.error("Error fetching admin data:", error);
-      } finally {
+        setUsers(enriched);
         setLoading(false);
-      }
-    };
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'transactions');
+        setLoading(false);
+      });
 
-    fetchData();
+      return () => unsubscribeTransactions();
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'users');
+      setLoading(false);
+    });
+
+    return () => unsubscribeUsers();
   }, []);
 
   const filteredUsers = useMemo(() => {

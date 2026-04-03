@@ -5,5 +5,6 @@
   "storageBucket": "ay-bay-er-gustimari.firebasestorage.app",
   "messagingSenderId": "527277956714",
   "appId": "1:527277956714:web:c5cf790b15f8715262b413",
-  "measurementId": "G-XJ2JN9LG1P"
+  "measurementId": "G-XJ2JN9LG1P",
+  "firestoreDatabaseId": "(default)"
 }
