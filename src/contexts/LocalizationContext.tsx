@@ -22,6 +22,7 @@ export const translations: Translations = {
   addTransaction: { en: 'Add Transaction', bn: 'লেনদেন যোগ করুন' },
   income: { en: 'Income', bn: 'আয়' },
   expense: { en: 'Expense', bn: 'ব্যয়' },
+  debt_repayment: { en: 'Debt repayment', bn: 'ঋণ পরিশোধ' },
   amount: { en: 'Amount', bn: 'পরিমাণ' },
   category: { en: 'Category', bn: 'বিভাগ' },
   date: { en: 'Date', bn: 'তারিখ' },
@@ -75,6 +76,12 @@ export const translations: Translations = {
   incomeSource: { en: 'Income Source', bn: 'আয়ের উৎস' },
   expenseSource: { en: 'Expense Source', bn: 'ব্যয়ের উৎস' },
   sourceName: { en: 'Source Name', bn: 'উৎসের নাম' },
+  debtSettlement: { en: 'Debt settlement', bn: 'ঋণ নিষ্পত্তি' },
+  subtotal: { en: 'Subtotal', bn: 'উপমোট' },
+  typeCol: { en: 'Type', bn: 'ধরন' },
+  pdfStatementTitle: { en: 'Monthly Financial Statement', bn: 'মাসিক আর্থিক বিবৃতি' },
+  noteAndMember: { en: 'Note / Member', bn: 'নোট / সদস্য' },
+  noFixedInSection: { en: 'No entries yet.', bn: 'এখনও কোনো নেই।' },
 };
 
 interface LocalizationContextType {

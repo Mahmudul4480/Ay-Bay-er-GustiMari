@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { db } from '../firebaseConfig';
 import { collection, onSnapshot, query, orderBy, limit, where } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
@@ -19,6 +19,21 @@ import { startOfWeek, format, subWeeks, isWithinInterval } from 'date-fns';
 
 const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const { language, t } = useLocalization();
+  const adminChartUid = React.useId().replace(/:/g, '');
+
+  const chartTooltipStyle = useCallback((): React.CSSProperties => {
+    const dark = document.documentElement.classList.contains('dark');
+    return {
+      borderRadius: '16px',
+      border: 'none',
+      boxShadow: dark
+        ? '0 22px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.06)'
+        : '0 22px 44px -10px rgba(15,23,42,0.2), 0 10px 24px -6px rgba(99,102,241,0.2)',
+      backgroundColor: dark ? '#1e293b' : '#ffffff',
+      color: dark ? '#fff' : '#0f172a',
+      padding: '12px 16px',
+    };
+  }, []);
   const [users, setUsers] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -207,7 +222,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         <motion.div 
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
-          className="bg-white dark:bg-slate-800 p-6 rounded-[2.5rem] shadow-sm border border-slate-100 dark:border-slate-700"
+          className="admin-chart-card-3d rounded-[2.5rem] border border-slate-200/90 p-6 dark:border-slate-700"
         >
           <div className="flex items-center gap-3 mb-6">
             <PieChartIcon className="w-5 h-5 text-blue-500" />
@@ -216,6 +231,14 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           <div className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
+                <defs>
+                  {COLORS.map((c, i) => (
+                    <linearGradient key={i} id={`adm-pie-${adminChartUid}-${i}`} x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stopColor={c} stopOpacity={1} />
+                      <stop offset="100%" stopColor={c} stopOpacity={0.58} />
+                    </linearGradient>
+                  ))}
+                </defs>
                 <Pie
                   data={spendingDistribution}
                   cx="50%"
@@ -225,12 +248,12 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                   paddingAngle={5}
                   dataKey="value"
                 >
-                  {spendingDistribution.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  {spendingDistribution.map((_, index) => (
+                    <Cell key={`cell-${index}`} fill={`url(#adm-pie-${adminChartUid}-${index % COLORS.length})`} />
                   ))}
                 </Pie>
                 <Tooltip 
-                  contentStyle={{ borderRadius: '1rem', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                  contentStyle={chartTooltipStyle()}
                   formatter={(value: number) => formatCurrency(value, language)}
                 />
                 <Legend verticalAlign="bottom" height={36}/>
@@ -242,7 +265,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         <motion.div 
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
-          className="bg-white dark:bg-slate-800 p-6 rounded-[2.5rem] shadow-sm border border-slate-100 dark:border-slate-700"
+          className="admin-chart-card-3d rounded-[2.5rem] border border-slate-200/90 p-6 dark:border-slate-700"
         >
           <div className="flex items-center gap-3 mb-6">
             <BarChart3 className="w-5 h-5 text-purple-500" />
@@ -251,14 +274,20 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           <div className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={userGrowthData}>
+                <defs>
+                  <linearGradient id={`adm-bar-${adminChartUid}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#7c3aed" />
+                    <stop offset="100%" stopColor="#c4b5fd" />
+                  </linearGradient>
+                </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
                 <Tooltip 
-                  cursor={{ fill: 'transparent' }}
-                  contentStyle={{ borderRadius: '1rem', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                  cursor={{ fill: 'rgba(139, 92, 246, 0.08)' }}
+                  contentStyle={chartTooltipStyle()}
                 />
-                <Bar dataKey="count" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="count" fill={`url(#adm-bar-${adminChartUid})`} radius={[10, 10, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -290,8 +319,8 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
               className={cn(
                 "flex items-center gap-2 px-6 py-4 rounded-2xl font-bold whitespace-nowrap transition-all border",
                 filter === f.id 
-                  ? "bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-500/20" 
-                  : "bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700"
+                  ? "bg-blue-600 border-blue-600 text-white shadow-[0_12px_28px_-4px_rgba(59,130,246,0.45)]" 
+                  : "bg-white dark:bg-slate-800 border-slate-200/90 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 shadow-[0_4px_14px_-4px_rgba(15,23,42,0.08)]"
               )}
             >
               <f.icon className="w-4 h-4" />
@@ -302,7 +331,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       </div>
 
       {/* User Table */}
-      <div className="bg-white dark:bg-slate-800 rounded-[2.5rem] shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">
+      <div className="admin-table-card-3d overflow-hidden rounded-[2.5rem] border border-slate-200/90 dark:border-slate-700">
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
@@ -454,9 +483,17 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                         <div className="flex items-center gap-3">
                           <div className={cn(
                             "w-10 h-10 rounded-xl flex items-center justify-center",
-                            t.type === 'income' ? "bg-green-100 dark:bg-green-900/30" : "bg-red-100 dark:bg-red-900/30"
+                            t.type === 'expense' ? "bg-red-100 dark:bg-red-900/30" :
+                            t.type === 'debt_repayment' ? "bg-teal-100 dark:bg-teal-900/30" :
+                            "bg-green-100 dark:bg-green-900/30"
                           )}>
-                            {t.type === 'income' ? <TrendingUp className="w-5 h-5 text-green-600" /> : <TrendingDown className="w-5 h-5 text-red-600" />}
+                            {t.type === 'expense' ? (
+                              <TrendingDown className="w-5 h-5 text-red-600" />
+                            ) : t.type === 'debt_repayment' ? (
+                              <TrendingUp className="w-5 h-5 text-teal-600" />
+                            ) : (
+                              <TrendingUp className="w-5 h-5 text-green-600" />
+                            )}
                           </div>
                           <div>
                             <p className="text-sm font-bold text-slate-800 dark:text-white">{t.category}</p>
@@ -465,9 +502,11 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                         </div>
                         <p className={cn(
                           "font-black",
-                          t.type === 'income' ? "text-green-600" : "text-red-500"
+                          t.type === 'expense' ? "text-red-500" :
+                          t.type === 'debt_repayment' ? "text-teal-600" :
+                          "text-green-600"
                         )}>
-                          {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount, language)}
+                          {t.type === 'expense' ? '-' : '+'}{formatCurrency(t.amount, language)}
                         </p>
                       </div>
                     ))}

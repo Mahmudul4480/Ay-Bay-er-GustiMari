@@ -9,6 +9,7 @@ import { X, Save, AlertTriangle } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 import { Transaction } from '../hooks/useTransactions';
+import { useTransactionFeedback } from '../contexts/TransactionFeedbackContext';
 
 interface TransactionFormProps {
   onClose: () => void;
@@ -21,8 +22,11 @@ import { convertBengaliToAscii, sanitizeDecimal } from '../lib/numberUtils';
 const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, initialType, transaction }) => {
   const { user, userProfile } = useAuth();
   const { t } = useLocalization();
+  const { celebrate, gloom } = useTransactionFeedback();
   const [amount, setAmount] = useState(transaction ? transaction.amount.toString() : '');
-  const [type, setType] = useState<'income' | 'expense'>(transaction ? transaction.type : (initialType || 'expense'));
+  const [type, setType] = useState<'income' | 'expense' | 'debt_repayment'>(
+    transaction ? transaction.type : (initialType || 'expense')
+  );
   const [category, setCategory] = useState(transaction ? transaction.category : '');
   const [newCategory, setNewCategory] = useState('');
   const [isAddingCategory, setIsAddingCategory] = useState(false);
@@ -63,7 +67,7 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, initialType,
 
       // Update user profile if new category/member added
       if (isAddingCategory && newCategory.trim()) {
-        const field = type === 'income' ? 'incomeCategories' : 'expenseCategories';
+        const field = type === 'income' || type === 'debt_repayment' ? 'incomeCategories' : 'expenseCategories';
         const currentCategories = userProfile[field] || [];
         const trimmed = newCategory.trim();
         if (!currentCategories.includes(trimmed)) {
@@ -113,6 +117,8 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, initialType,
             ...transactionData,
             createdAt: serverTimestamp(),
           });
+          if (type === 'income') celebrate();
+          else if (type === 'expense') gloom();
         }
         onClose();
       } catch (err) {
@@ -126,9 +132,14 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, initialType,
     }
   };
 
-  const categories = type === 'income' 
-    ? (userProfile?.incomeCategories || [])
-    : (userProfile?.expenseCategories || []);
+  const baseCategories =
+    type === 'income' || type === 'debt_repayment'
+      ? (userProfile?.incomeCategories || [])
+      : (userProfile?.expenseCategories || []);
+  const categories =
+    category && !baseCategories.includes(category)
+      ? [category, ...baseCategories]
+      : baseCategories;
 
   const familyMembers = userProfile?.familyMembers || ['Self'];
 
@@ -155,28 +166,36 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, initialType,
         )}
 
         <form onSubmit={handleSubmit} className="p-8 space-y-6">
-          <div className="flex p-1 bg-slate-100 dark:bg-slate-700 rounded-2xl">
-            <button
-              type="button"
-              onClick={() => setType('income')}
-              className={cn(
-                "flex-1 py-3 rounded-xl font-semibold transition-all",
-                type === 'income' ? "bg-white dark:bg-slate-600 text-green-600 dark:text-green-400 shadow-sm" : "text-slate-500 dark:text-slate-400"
-              )}
-            >
-              {t('income')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setType('expense')}
-              className={cn(
-                "flex-1 py-3 rounded-xl font-semibold transition-all",
-                type === 'expense' ? "bg-white dark:bg-slate-600 text-red-600 dark:text-red-400 shadow-sm" : "text-slate-500 dark:text-slate-400"
-              )}
-            >
-              {t('expense')}
-            </button>
-          </div>
+          {type === 'debt_repayment' ? (
+            <div className="flex p-1 bg-teal-50 dark:bg-teal-900/20 rounded-2xl border border-teal-100 dark:border-teal-800">
+              <div className="flex-1 py-3 rounded-xl font-semibold text-center text-teal-700 dark:text-teal-300">
+                {t('debt_repayment')}
+              </div>
+            </div>
+          ) : (
+            <div className="flex p-1 bg-slate-100 dark:bg-slate-700 rounded-2xl">
+              <button
+                type="button"
+                onClick={() => setType('income')}
+                className={cn(
+                  "flex-1 py-3 rounded-xl font-semibold transition-all",
+                  type === 'income' ? "bg-white dark:bg-slate-600 text-green-600 dark:text-green-400 shadow-sm" : "text-slate-500 dark:text-slate-400"
+                )}
+              >
+                {t('income')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setType('expense')}
+                className={cn(
+                  "flex-1 py-3 rounded-xl font-semibold transition-all",
+                  type === 'expense' ? "bg-white dark:bg-slate-600 text-red-600 dark:text-red-400 shadow-sm" : "text-slate-500 dark:text-slate-400"
+                )}
+              >
+                {t('expense')}
+              </button>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div className="space-y-2">

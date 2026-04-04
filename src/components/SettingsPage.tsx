@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { useLocalization } from '../contexts/LocalizationContext';
-import { useTransactions } from '../hooks/useTransactions';
+import { useLocalization, translations } from '../contexts/LocalizationContext';
+import { useTransactions, FixedFinance } from '../hooks/useTransactions';
 import { db } from '../firebaseConfig';
 import { doc, updateDoc, collection, addDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
@@ -12,11 +12,90 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 import { convertBengaliToAscii, sanitizeDecimal, sanitizeInteger } from '../lib/numberUtils';
+import {
+  buildGroupedTransactionRows,
+  embedAnekBanglaFont,
+  escapeHtml,
+} from '../lib/pdfStatement';
 
 const SettingsPage: React.FC = () => {
   const { user, userProfile } = useAuth();
   const { language, setLanguage, t } = useLocalization();
   const { transactions = [], debts = [], fixedFinances = [] } = useTransactions();
+
+  const fixedIncomeItems = useMemo(
+    () =>
+      fixedFinances
+        .filter((f) => (f.type ?? 'expense') === 'income')
+        .sort((a, b) => (a.dayOfMonth ?? 0) - (b.dayOfMonth ?? 0)),
+    [fixedFinances]
+  );
+
+  const fixedExpenseItems = useMemo(
+    () =>
+      fixedFinances
+        .filter((f) => (f.type ?? 'expense') !== 'income')
+        .sort((a, b) => (a.dayOfMonth ?? 0) - (b.dayOfMonth ?? 0)),
+    [fixedFinances]
+  );
+
+  const renderFixedCard = (fixed: FixedFinance) => (
+    <div
+      key={fixed.id}
+      className={cn(
+        'group relative cursor-pointer rounded-2xl border p-6 transition-all hover:border-blue-200 dark:hover:border-blue-800',
+        (fixed.type ?? 'expense') === 'income'
+          ? 'border-green-200/90 bg-gradient-to-br from-green-50/90 to-white dark:border-green-800/50 dark:from-green-950/30 dark:to-slate-900'
+          : 'border-red-200/90 bg-gradient-to-br from-red-50/90 to-white dark:border-red-800/50 dark:from-red-950/25 dark:to-slate-900'
+      )}
+      onClick={() => openEditFixed(fixed)}
+    >
+      <button
+        type="button"
+        onClick={async (e) => {
+          e.stopPropagation();
+          setConfirmModal({
+            title: t('delete'),
+            message: t('confirmDelete'),
+            onConfirm: async () => {
+              try {
+                await deleteDoc(doc(db, 'fixedFinances', fixed.id));
+              } catch (error) {
+                handleFirestoreError(error, OperationType.DELETE, `fixedFinances/${fixed.id}`);
+              }
+              setConfirmModal(null);
+            },
+          });
+        }}
+        className="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full p-0 text-slate-400 opacity-0 transition-all hover:bg-slate-100 hover:text-red-500 group-hover:opacity-100 dark:hover:bg-slate-700"
+        aria-label={t('delete')}
+      >
+        <X className="h-4 w-4 pointer-events-none" />
+      </button>
+      <div className="mb-2 flex items-center gap-2">
+        <span
+          className={cn(
+            'rounded-lg px-2 py-1 text-[10px] font-bold uppercase tracking-wider',
+            (fixed.type ?? 'expense') === 'income'
+              ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+              : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+          )}
+        >
+          {t((fixed.type ?? 'expense') === 'income' ? 'income' : 'expense')}
+        </span>
+        <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+          {t('dayOfMonth')}: {fixed.dayOfMonth}
+        </span>
+      </div>
+      <h4 className="text-lg font-bold text-slate-800 dark:text-slate-100">{fixed.category}</h4>
+      <p className="mt-1 text-2xl font-black text-slate-900 dark:text-white">
+        {formatCurrency(fixed.amount, language)}
+      </p>
+      {fixed.description && (
+        <p className="mt-2 line-clamp-2 text-sm text-slate-500 dark:text-slate-400">{fixed.description}</p>
+      )}
+    </div>
+  );
   const [budgetLimit, setBudgetLimit] = useState(userProfile?.budgetLimit || 0);
   const [isSaving, setIsSaving] = useState(false);
   const [isAddingFixed, setIsAddingFixed] = useState(false);
@@ -268,47 +347,87 @@ const SettingsPage: React.FC = () => {
 
   const generatePDF = async () => {
     const doc = new jsPDF() as any;
-    
-    // Create a temporary element for the header to capture with html2canvas
+
+    const hasAnek = await embedAnekBanglaFont(doc);
+    const pdfFont = hasAnek ? 'AnekBangla' : 'helvetica';
+    doc.setFont(pdfFont, 'normal');
+
+    const appTitleEn = translations.appName.en;
+    const appTitleBn = translations.appName.bn;
+
     const headerEl = document.createElement('div');
     headerEl.style.position = 'absolute';
     headerEl.style.left = '-9999px';
     headerEl.style.top = '-9999px';
-    headerEl.style.width = '800px';
-    headerEl.style.padding = '40px';
-    headerEl.style.backgroundColor = 'white';
-    headerEl.style.fontFamily = '"Anek Bangla", sans-serif';
-    
-    headerEl.innerHTML = `
-      <div style="display: flex; align-items: center; gap: 20px; border-bottom: 2px solid #3b82f6; padding-bottom: 20px;">
-        <img src="https://i.postimg.cc/K8yGqVdy/logo-png.png" style="width: 60px; height: 60px; border-radius: 12px;" />
-        <div>
-          <h1 style="font-size: 32px; color: #1e293b; margin: 0;">আয় ব্যায়ের গুষ্টিমারি</h1>
-          <p style="font-size: 14px; color: #64748b; margin: 5px 0 0 0;">Monthly Financial Statement</p>
+    headerEl.style.width = '720px';
+    headerEl.style.boxSizing = 'border-box';
+    headerEl.style.padding = '28px 32px';
+    headerEl.style.backgroundColor = '#ffffff';
+
+    const fontLink = document.createElement('link');
+    fontLink.rel = 'stylesheet';
+    fontLink.href =
+      'https://fonts.googleapis.com/css2?family=Anek+Bangla:wght@400;600;700&subset=bengali,latin&display=swap';
+    headerEl.appendChild(fontLink);
+
+    const wrap = document.createElement('div');
+    wrap.style.fontFamily = '"Anek Bangla", system-ui, sans-serif';
+    wrap.style.color = '#0f172a';
+    wrap.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 12px; border-bottom: 2px solid #3b82f6; padding-bottom: 16px;">
+        <div style="flex-shrink: 0; width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; background: #f8fafc; border-radius: 12px;">
+          <img crossorigin="anonymous" src="https://i.postimg.cc/K8yGqVdy/logo-png.png" alt=""
+            style="display: block; max-width: 52px; max-height: 52px; width: auto; height: auto; object-fit: contain;" />
+        </div>
+        <div style="flex: 1; min-width: 0;">
+          <div style="font-size: 17px; font-weight: 700; letter-spacing: -0.04em; word-spacing: 0; margin: 0; line-height: 1.12; color: #0f172a;">
+            ${escapeHtml(appTitleEn)}
+          </div>
+          <div style="font-size: 19px; font-weight: 600; margin: 4px 0 0 0; line-height: 1.2; color: #1e293b;">
+            ${escapeHtml(appTitleBn)}
+          </div>
+          <p style="font-size: 12px; color: #64748b; margin: 6px 0 0 0; letter-spacing: 0;">
+            ${escapeHtml(t('pdfStatementTitle'))}
+          </p>
         </div>
       </div>
-      <div style="margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 14px; color: #475569;">
-        <div><strong>User:</strong> ${userProfile?.displayName || user?.displayName}</div>
-        <div><strong>Date:</strong> ${new Date().toLocaleDateString()}</div>
-        <div><strong>Mobile:</strong> ${userProfile?.phoneNumber || 'N/A'}</div>
-        <div><strong>Email:</strong> ${userProfile?.email || user?.email}</div>
+      <div style="margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; font-size: 13px; color: #475569;">
+        <div><strong>User:</strong> ${escapeHtml(userProfile?.displayName || user?.displayName || '')}</div>
+        <div><strong>Date:</strong> ${escapeHtml(new Date().toLocaleDateString())}</div>
+        <div><strong>Mobile:</strong> ${escapeHtml(userProfile?.phoneNumber || 'N/A')}</div>
+        <div><strong>Email:</strong> ${escapeHtml(userProfile?.email || user?.email || '')}</div>
       </div>
     `;
-    
+    headerEl.appendChild(wrap);
+
     document.body.appendChild(headerEl);
-    
-    // Wait for the logo image to load
+
+    await new Promise<void>((resolve) => {
+      if (fontLink.sheet) resolve();
+      else {
+        fontLink.onload = () => resolve();
+        fontLink.onerror = () => resolve();
+        setTimeout(resolve, 2500);
+      }
+    });
+    try {
+      await document.fonts.ready;
+      await document.fonts.load('16px "Anek Bangla"');
+    } catch {
+      /* ignore */
+    }
+
     const logoImg = headerEl.querySelector('img');
     if (logoImg) {
-      await new Promise((resolve) => {
-        if (logoImg.complete) resolve(null);
+      await new Promise<void>((resolve) => {
+        if (logoImg.complete) resolve();
         else {
-          logoImg.onload = () => resolve(null);
-          logoImg.onerror = () => resolve(null);
+          logoImg.onload = () => resolve();
+          logoImg.onerror = () => resolve();
         }
       });
     }
-    
+
     try {
       const html2canvas = (await import('html2canvas')).default;
       const canvas = await html2canvas(headerEl, {
@@ -316,43 +435,56 @@ const SettingsPage: React.FC = () => {
         useCORS: true,
         backgroundColor: '#ffffff',
         onclone: (clonedDoc) => {
-          // Remove all style and link tags to avoid oklch parsing errors from Tailwind v4
           const styles = clonedDoc.querySelectorAll('style, link[rel="stylesheet"]');
-          styles.forEach(s => {
-            // Keep Google Fonts but remove everything else (especially Tailwind which uses oklch)
-            const isGoogleFont = s.tagName === 'LINK' && (s as HTMLLinkElement).href?.includes('fonts.googleapis.com');
+          styles.forEach((s) => {
+            const isGoogleFont =
+              s.tagName === 'LINK' &&
+              (s as HTMLLinkElement).href?.includes('fonts.googleapis.com');
             if (!isGoogleFont) {
               s.remove();
             }
           });
-        }
+        },
       });
       const imgData = canvas.toDataURL('image/png');
-      
-      // Add the header image to PDF
-      const imgWidth = 180;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      doc.addImage(imgData, 'PNG', 15, 10, imgWidth, imgHeight);
 
-      const tableData = transactions.map(tx => [
-        tx.date ? (
-          typeof tx.date.toDate === 'function' 
-            ? tx.date.toDate().toLocaleDateString() 
-            : (tx.date instanceof Date ? tx.date.toLocaleDateString() : 'N/A')
-        ) : 'N/A',
-        tx.category,
-        tx.type.toUpperCase(),
-        tx.amount.toFixed(2),
-        tx.note || tx.familyMember || ''
-      ]);
+      const pageW = doc.internal.pageSize.getWidth();
+      const marginX = 14;
+      const maxImgW = pageW - marginX * 2;
+      const imgWidth = maxImgW;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      doc.addImage(imgData, 'PNG', marginX, 10, imgWidth, imgHeight);
+
+      const tableBody = buildGroupedTransactionRows(transactions, t);
 
       autoTable(doc, {
-        startY: 10 + imgHeight + 10,
-        head: [['Date', 'Category', 'Type', 'Amount', 'Note/Member']],
-        body: tableData,
-        headStyles: { fillColor: [59, 130, 246] },
+        startY: 12 + imgHeight + 8,
+        margin: { left: marginX, right: marginX },
+        head: [
+          [
+            t('date'),
+            t('category'),
+            t('typeCol'),
+            t('amount'),
+            t('noteAndMember'),
+          ],
+        ],
+        body: tableBody,
+        headStyles: {
+          fillColor: [59, 130, 246],
+          font: pdfFont,
+          fontStyle: 'bold',
+        },
         alternateRowStyles: { fillColor: [248, 250, 252] },
-        styles: { font: 'helvetica' }
+        styles: {
+          font: pdfFont,
+          fontSize: 9,
+          cellPadding: 3,
+        },
+        columnStyles: {
+          0: { cellWidth: 28 },
+          3: { halign: 'right' },
+        },
       });
 
       doc.save(`amar-hisab-report-${new Date().toISOString().split('T')[0]}.pdf`);
@@ -711,51 +843,37 @@ const SettingsPage: React.FC = () => {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {fixedFinances.map((fixed) => (
-              <div 
-                key={fixed.id} 
-                className="p-6 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-700 relative group cursor-pointer hover:border-blue-200 dark:hover:border-blue-800 transition-all"
-                onClick={() => openEditFixed(fixed)}
-              >
-                <button
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    setConfirmModal({
-                      title: t('delete'),
-                      message: t('confirmDelete'),
-                      onConfirm: async () => {
-                        try {
-                          await deleteDoc(doc(db, 'fixedFinances', fixed.id));
-                        } catch (error) {
-                          handleFirestoreError(error, OperationType.DELETE, `fixedFinances/${fixed.id}`);
-                        }
-                        setConfirmModal(null);
-                      }
-                    });
-                  }}
-                  className="absolute top-4 right-4 p-2 text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-                <div className="flex items-center gap-2 mb-2">
-                  <span className={cn(
-                    "px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider",
-                    fixed.type === 'income' ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300" : "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300"
-                  )}>
-                    {t(fixed.type)}
-                  </span>
-                  <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">{t('dayOfMonth')}: {fixed.dayOfMonth}</span>
-                </div>
-                <h4 className="font-bold text-slate-800 dark:text-slate-100 text-lg">{fixed.category}</h4>
-                <p className="text-2xl font-black text-slate-900 dark:text-white mt-1">
-                  {formatCurrency(fixed.amount, language)}
-                </p>
-                {fixed.description && (
-                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 line-clamp-2">{fixed.description}</p>
+          <div className="space-y-10">
+            <div>
+              <h4 className="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-green-600 dark:text-green-400">
+                <span className="h-2 w-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]" />
+                {t('income')}
+              </h4>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {fixedIncomeItems.length === 0 ? (
+                  <p className="col-span-full text-sm text-slate-500 dark:text-slate-400">
+                    {t('noFixedInSection')}
+                  </p>
+                ) : (
+                  fixedIncomeItems.map((fixed) => renderFixedCard(fixed))
                 )}
               </div>
-            ))}
+            </div>
+            <div>
+              <h4 className="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-red-600 dark:text-red-400">
+                <span className="h-2 w-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]" />
+                {t('expense')}
+              </h4>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {fixedExpenseItems.length === 0 ? (
+                  <p className="col-span-full text-sm text-slate-500 dark:text-slate-400">
+                    {t('noFixedInSection')}
+                  </p>
+                ) : (
+                  fixedExpenseItems.map((fixed) => renderFixedCard(fixed))
+                )}
+              </div>
+            </div>
           </div>
         </motion.div>
       </div>

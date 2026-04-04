@@ -20,6 +20,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
   const { transactions = [], debts = [] } = useTransactions();
   const { t, language } = useLocalization();
   const { userProfile } = useAuth();
+  const chartUid = React.useId().replace(/:/g, '');
+
+  const chartTooltipStyle = React.useCallback((): React.CSSProperties => {
+    const dark = document.documentElement.classList.contains('dark');
+    return {
+      borderRadius: '16px',
+      border: 'none',
+      boxShadow: dark
+        ? '0 22px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.06)'
+        : '0 22px 44px -10px rgba(15,23,42,0.2), 0 10px 24px -6px rgba(59,130,246,0.18)',
+      backgroundColor: dark ? '#1e293b' : '#ffffff',
+      color: dark ? '#fff' : '#0f172a',
+      padding: '12px 16px',
+    };
+  }, []);
   const [modalType, setModalType] = React.useState<'income' | 'expense' | null>(null);
   const [editingTransaction, setEditingTransaction] = React.useState<Transaction | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = React.useState<string | null>(null);
@@ -116,7 +131,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
     const existing = acc.find(a => a.name === month);
     if (existing) {
       if (curr.type === 'income') existing.income += curr.amount;
-      else existing.expense += curr.amount;
+      else if (curr.type === 'expense') existing.expense += curr.amount;
     } else {
       acc.push({ 
         name: month, 
@@ -154,8 +169,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
               else if (stat.id === 'netDebt' && onTabChange) onTabChange('debts');
             }}
             className={cn(
-              "neon-card p-6 flex items-center gap-4 transition-all",
-              (stat.id === 'balance' || stat.id === 'income' || stat.id === 'expense' || stat.id === 'netDebt') && "cursor-pointer active:scale-95"
+              "neon-card dashboard-card-3d p-6 flex items-center gap-4 transition-all",
+              (stat.id === 'balance' || stat.id === 'income' || stat.id === 'expense' || stat.id === 'netDebt') && "cursor-pointer active:scale-[0.98]"
             )}
           >
             <div className={cn("p-4 rounded-2xl", stat.bg, stat.bg.includes('blue') && 'dark:bg-blue-900/20', stat.bg.includes('green') && 'dark:bg-green-900/20', stat.bg.includes('red') && 'dark:bg-red-900/20', stat.bg.includes('orange') && 'dark:bg-orange-900/20', stat.bg.includes('slate') && 'dark:bg-slate-700')}>
@@ -173,12 +188,22 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="neon-card p-8 lg:col-span-2"
+          className="neon-card dashboard-card-3d p-8 lg:col-span-2"
         >
           <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-6">Income & Expense Trends</h3>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={trendData}>
+                <defs>
+                  <linearGradient id={`lineInc-${chartUid}`} x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#059669" />
+                    <stop offset="100%" stopColor="#34d399" />
+                  </linearGradient>
+                  <linearGradient id={`lineExp-${chartUid}`} x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#dc2626" />
+                    <stop offset="100%" stopColor="#fb7185" />
+                  </linearGradient>
+                </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                 <XAxis 
                   dataKey="name" 
@@ -194,32 +219,26 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                 />
                 <Tooltip 
                   formatter={(value: number) => [formatCurrency(value, language), '']}
-                  contentStyle={{ 
-                    borderRadius: '16px', 
-                    border: 'none', 
-                    boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
-                    backgroundColor: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-                    color: document.documentElement.classList.contains('dark') ? '#fff' : '#000'
-                  }} 
+                  contentStyle={chartTooltipStyle()} 
                   itemStyle={{ fontWeight: 'bold' }}
                 />
                 <Legend verticalAlign="top" height={36}/>
                 <Line 
                   type="monotone" 
                   dataKey="income" 
-                  stroke="#10b981" 
-                  strokeWidth={3} 
-                  dot={{ r: 4, fill: '#10b981' }}
-                  activeDot={{ r: 6, strokeWidth: 2, stroke: '#fff' }}
+                  stroke={`url(#lineInc-${chartUid})`}
+                  strokeWidth={4} 
+                  dot={{ r: 4, fill: '#10b981', strokeWidth: 2, stroke: '#fff' }}
+                  activeDot={{ r: 7, strokeWidth: 2, stroke: '#fff' }}
                   name={t('income')} 
                 />
                 <Line 
                   type="monotone" 
                   dataKey="expense" 
-                  stroke="#ef4444" 
-                  strokeWidth={3} 
-                  dot={{ r: 4, fill: '#ef4444' }}
-                  activeDot={{ r: 6, strokeWidth: 2, stroke: '#fff' }}
+                  stroke={`url(#lineExp-${chartUid})`}
+                  strokeWidth={4} 
+                  dot={{ r: 4, fill: '#ef4444', strokeWidth: 2, stroke: '#fff' }}
+                  activeDot={{ r: 7, strokeWidth: 2, stroke: '#fff' }}
                   name={t('expense')} 
                 />
                 <Brush 
@@ -239,12 +258,20 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="neon-card p-8"
+          className="neon-card dashboard-card-3d p-8"
         >
           <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-6">{t('monthlyExpense')} {t('category')}</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
+                <defs>
+                  {COLORS.map((c, i) => (
+                    <linearGradient key={i} id={`pie-cat-${chartUid}-${i}`} x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stopColor={c} stopOpacity={1} />
+                      <stop offset="100%" stopColor={c} stopOpacity={0.58} />
+                    </linearGradient>
+                  ))}
+                </defs>
                 <Pie
                   data={categoryData}
                   cx="50%"
@@ -254,18 +281,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                   paddingAngle={5}
                   dataKey="value"
                 >
-                  {categoryData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  {categoryData.map((_, index) => (
+                    <Cell key={`cell-${index}`} fill={`url(#pie-cat-${chartUid}-${index % COLORS.length})`} />
                   ))}
                 </Pie>
                 <Tooltip 
-                  contentStyle={{ 
-                    borderRadius: '16px', 
-                    border: 'none', 
-                    boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
-                    backgroundColor: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-                    color: document.documentElement.classList.contains('dark') ? '#fff' : '#000'
-                  }} 
+                  contentStyle={chartTooltipStyle()} 
                 />
                 <Legend />
               </PieChart>
@@ -276,12 +297,20 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="neon-card p-8"
+          className="neon-card dashboard-card-3d p-8"
         >
           <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-6">{t('expenseByMember')}</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
+                <defs>
+                  {COLORS.map((c, i) => (
+                    <linearGradient key={`mex-${i}`} id={`pie-memexp-${chartUid}-${i}`} x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stopColor={c} stopOpacity={1} />
+                      <stop offset="100%" stopColor={c} stopOpacity={0.55} />
+                    </linearGradient>
+                  ))}
+                </defs>
                 <Pie
                   data={memberExpenseData}
                   cx="50%"
@@ -291,18 +320,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                   paddingAngle={5}
                   dataKey="value"
                 >
-                  {memberExpenseData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  {memberExpenseData.map((_, index) => (
+                    <Cell key={`cell-${index}`} fill={`url(#pie-memexp-${chartUid}-${index % COLORS.length})`} />
                   ))}
                 </Pie>
                 <Tooltip 
-                  contentStyle={{ 
-                    borderRadius: '16px', 
-                    border: 'none', 
-                    boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
-                    backgroundColor: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-                    color: document.documentElement.classList.contains('dark') ? '#fff' : '#000'
-                  }} 
+                  contentStyle={chartTooltipStyle()} 
                 />
                 <Legend />
               </PieChart>
@@ -315,26 +338,30 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="neon-card p-8"
+          className="neon-card dashboard-card-3d p-8"
         >
           <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-6">{t('income')} vs {t('expense')}</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={[{ name: 'Total', income: totalIncome, expense: totalExpense }]}>
+                <defs>
+                  <linearGradient id={`barInc-${chartUid}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#059669" />
+                    <stop offset="100%" stopColor="#6ee7b7" />
+                  </linearGradient>
+                  <linearGradient id={`barExp-${chartUid}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#b91c1c" />
+                    <stop offset="100%" stopColor="#fca5a5" />
+                  </linearGradient>
+                </defs>
                 <XAxis dataKey="name" hide />
                 <YAxis tick={{ fill: '#94a3b8' }} />
                 <Tooltip 
-                  contentStyle={{ 
-                    borderRadius: '16px', 
-                    border: 'none', 
-                    boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
-                    backgroundColor: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-                    color: document.documentElement.classList.contains('dark') ? '#fff' : '#000'
-                  }} 
+                  contentStyle={chartTooltipStyle()} 
                 />
                 <Legend />
-                <Bar dataKey="income" fill="#10b981" radius={[4, 4, 0, 0]} name={t('income')} />
-                <Bar dataKey="expense" fill="#ef4444" radius={[4, 4, 0, 0]} name={t('expense')} />
+                <Bar dataKey="income" fill={`url(#barInc-${chartUid})`} radius={[8, 8, 0, 0]} name={t('income')} />
+                <Bar dataKey="expense" fill={`url(#barExp-${chartUid})`} radius={[8, 8, 0, 0]} name={t('expense')} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -343,12 +370,20 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="neon-card p-8"
+          className="neon-card dashboard-card-3d p-8"
         >
           <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-6">{t('incomeByMember')}</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
+                <defs>
+                  {COLORS.map((c, i) => (
+                    <linearGradient key={`minc-${i}`} id={`pie-meminc-${chartUid}-${i}`} x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stopColor={c} stopOpacity={1} />
+                      <stop offset="100%" stopColor={c} stopOpacity={0.55} />
+                    </linearGradient>
+                  ))}
+                </defs>
                 <Pie
                   data={memberIncomeData}
                   cx="50%"
@@ -358,18 +393,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                   paddingAngle={5}
                   dataKey="value"
                 >
-                  {memberIncomeData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  {memberIncomeData.map((_, index) => (
+                    <Cell key={`cell-${index}`} fill={`url(#pie-meminc-${chartUid}-${index % COLORS.length})`} />
                   ))}
                 </Pie>
                 <Tooltip 
-                  contentStyle={{ 
-                    borderRadius: '16px', 
-                    border: 'none', 
-                    boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
-                    backgroundColor: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-                    color: document.documentElement.classList.contains('dark') ? '#fff' : '#000'
-                  }} 
+                  contentStyle={chartTooltipStyle()} 
                 />
                 <Legend />
               </PieChart>
@@ -378,7 +407,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         </motion.div>
       </div>
 
-      <div className="neon-card p-8">
+      <div className="neon-card dashboard-card-3d p-8">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-xl font-bold text-slate-800 dark:text-white">{t('dashboard')} - Recent Transactions</h3>
           {onTabChange && (
@@ -413,8 +442,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                   </td>
                   <td className="py-4 font-medium text-slate-800 dark:text-white">{tx.category}</td>
                   <td className="py-4 text-slate-500 dark:text-slate-400">{tx.familyMember}</td>
-                  <td className={cn("py-4 font-bold text-right", tx.type === 'income' ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")}>
-                    {tx.type === 'income' ? '+' : '-'}{formatCurrency(tx.amount, language)}
+                  <td className={cn(
+                    "py-4 font-bold text-right",
+                    tx.type === 'expense' ? "text-red-600 dark:text-red-400" :
+                    tx.type === 'debt_repayment' ? "text-teal-600 dark:text-teal-400" :
+                    "text-green-600 dark:text-green-400"
+                  )}>
+                    {tx.type === 'expense' ? '-' : '+'}{formatCurrency(tx.amount, language)}
                   </td>
                   <td className="py-4 text-right">
                     <div className="flex items-center justify-end gap-1">

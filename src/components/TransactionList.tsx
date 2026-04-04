@@ -13,7 +13,7 @@ const TransactionList: React.FC = () => {
   const { transactions = [], loading } = useTransactions();
   const { t, language } = useLocalization();
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'income' | 'expense' | 'debt_repayment'>('all');
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
@@ -60,7 +60,7 @@ const TransactionList: React.FC = () => {
         </div>
         
         <div className="flex p-1 bg-slate-100 dark:bg-slate-700 rounded-2xl w-full md:w-auto">
-          {(['all', 'income', 'expense'] as const).map((type) => (
+          {(['all', 'income', 'expense', 'debt_repayment'] as const).map((type) => (
             <button
               key={type}
               onClick={() => setFilterType(type)}
@@ -92,11 +92,13 @@ const TransactionList: React.FC = () => {
                 <div className="flex items-center gap-4">
                   <div className={cn(
                     "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-110",
-                    tx.type === 'income' 
-                      ? "bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400" 
-                      : "bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400"
+                    tx.type === 'expense'
+                      ? "bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400"
+                      : tx.type === 'debt_repayment'
+                        ? "bg-teal-50 dark:bg-teal-900/20 text-teal-600 dark:text-teal-400"
+                        : "bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400"
                   )}>
-                    {tx.type === 'income' ? <ArrowUpRight className="w-6 h-6" /> : <ArrowDownLeft className="w-6 h-6" />}
+                    {tx.type === 'expense' ? <ArrowDownLeft className="w-6 h-6" /> : <ArrowUpRight className="w-6 h-6" />}
                   </div>
                   
                   <div>
@@ -128,9 +130,11 @@ const TransactionList: React.FC = () => {
                 <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-6">
                   <div className={cn(
                     "text-xl font-black",
-                    tx.type === 'income' ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
+                    tx.type === 'expense' ? "text-red-600 dark:text-red-400" :
+                    tx.type === 'debt_repayment' ? "text-teal-600 dark:text-teal-400" :
+                    "text-green-600 dark:text-green-400"
                   )}>
-                    {tx.type === 'income' ? '+' : '-'} {formatCurrency(tx.amount, language)}
+                    {tx.type === 'expense' ? '-' : '+'} {formatCurrency(tx.amount, language)}
                   </div>
                   
                   <div className="flex items-center gap-2">

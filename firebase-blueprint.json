@@ -25,7 +25,7 @@
       "properties": {
         "userId": { "type": "string" },
         "amount": { "type": "number" },
-        "type": { "type": "string", "enum": ["income", "expense"] },
+        "type": { "type": "string", "enum": ["income", "expense", "debt_repayment"] },
         "category": { "type": "string" },
         "date": { "type": "string", "format": "date-time" },
         "note": { "type": "string" },

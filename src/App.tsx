@@ -1,6 +1,7 @@
 import React from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LocalizationProvider, useLocalization } from './contexts/LocalizationContext';
+import { TransactionFeedbackProvider } from './contexts/TransactionFeedbackContext';
 import { loginWithGoogle, logout, isInAppBrowser, isConfigValid } from './firebaseConfig';
 import { LogIn, LogOut, LayoutDashboard, CreditCard, Settings, Plus, Menu, X, Globe, Sun, Moon, AlertTriangle, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -406,7 +407,9 @@ export default function App() {
   return (
     <AuthProvider>
       <LocalizationProvider>
-        <AppContent />
+        <TransactionFeedbackProvider>
+          <AppContent />
+        </TransactionFeedbackProvider>
       </LocalizationProvider>
     </AuthProvider>
   );

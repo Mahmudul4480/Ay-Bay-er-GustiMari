@@ -10,11 +10,13 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Trash2, CheckCircle, Clock, User, DollarSign, Calendar, X, Phone, Filter, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle } from 'lucide-react';
 
 import { convertBengaliToAscii, sanitizeDecimal } from '../lib/numberUtils';
+import { useTransactionFeedback } from '../contexts/TransactionFeedbackContext';
 
 const DebtTracker: React.FC = () => {
   const { debts = [] } = useTransactions();
   const { t, language } = useLocalization();
   const { user } = useAuth();
+  const { celebrate } = useTransactionFeedback();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -116,24 +118,24 @@ const DebtTracker: React.FC = () => {
 
       // 2. Rule B & C: Adjust balance
       // If newStatus is 'paid':
-      //   Lent (lent) -> Paid: Got money back (income)
+      //   Lent (lent) -> Paid: Got money back (debt_repayment, not income)
       //   Borrowed (borrowed) -> Paid: Returned money (expense)
       // If newStatus is 'unpaid':
       //   Lent (lent) -> Unpaid: Money leaves pocket again (expense)
-      //   Borrowed (borrowed) -> Unpaid: Money enters pocket again (income)
+      //   Borrowed (borrowed) -> Unpaid: Money enters pocket again (debt_repayment)
       
-      let transactionType: 'income' | 'expense';
+      let transactionType: 'income' | 'expense' | 'debt_repayment';
       let category: string;
       let note: string;
 
       if (newStatus === 'paid') {
-        transactionType = debt.type === 'lent' ? 'income' : 'expense';
+        transactionType = debt.type === 'lent' ? 'debt_repayment' : 'expense';
         category = debt.type === 'lent' ? 'Debit Settlement' : 'Debit Reversal';
         note = debt.type === 'lent' 
           ? `Debit Settlement (Collected from ${debt.personName})` 
           : `Debit Reversal (Pay to ${debt.personName})`;
       } else {
-        transactionType = debt.type === 'lent' ? 'expense' : 'income';
+        transactionType = debt.type === 'lent' ? 'expense' : 'debt_repayment';
         category = 'Debt Reversal';
         note = `Reversed debt with ${debt.personName}`;
       }
@@ -148,8 +150,12 @@ const DebtTracker: React.FC = () => {
           note,
           familyMember: 'Self',
           isFixed: false,
-          debtId: debt.id
+          debtId: debt.id,
+          createdAt: serverTimestamp(),
         });
+        if (newStatus === 'paid' && debt.type === 'lent') {
+          celebrate();
+        }
       } catch (error) {
         handleFirestoreError(error, OperationType.CREATE, 'transactions');
       }
@@ -287,16 +293,16 @@ const DebtTracker: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-        <div className="neon-card p-6">
+        <div className="neon-card dashboard-card-3d p-6">
           <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">{t('lent')}</p>
           <p className="text-2xl font-bold text-green-600 dark:text-green-400">{formatCurrency(totalLent, language)}</p>
         </div>
-        <div className="neon-card p-6">
+        <div className="neon-card dashboard-card-3d p-6">
           <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">{t('borrowed')}</p>
           <p className="text-2xl font-bold text-red-600 dark:text-red-400">{formatCurrency(totalBorrowed, language)}</p>
         </div>
         <div className={cn(
-          "neon-card p-6",
+          "neon-card dashboard-card-3d p-6",
           netDebt >= 0 
             ? "bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-900/30" 
             : "bg-orange-50 dark:bg-orange-900/20 border-orange-100 dark:border-orange-900/30"
@@ -319,17 +325,20 @@ const DebtTracker: React.FC = () => {
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             className={cn(
-              "neon-card p-6 flex flex-col gap-4 relative overflow-hidden",
+              "neon-card dashboard-card-3d p-6 flex flex-col gap-4 relative overflow-hidden",
               debt.status === 'paid' && "opacity-80"
             )}
           >
-            <div className={cn(
-              "absolute top-0 right-0 w-24 h-24 -mr-8 -mt-8 rounded-full opacity-10",
-              debt.type === 'lent' ? "bg-green-500" : "bg-red-500"
-            )} />
-            
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+            <div
+              className={cn(
+                "pointer-events-none absolute top-0 right-0 w-24 h-24 -mr-8 -mt-8 rounded-full opacity-10",
+                debt.type === 'lent' ? "bg-green-500" : "bg-red-500"
+              )}
+              aria-hidden
+            />
+
+            <div className="relative z-10 flex items-center justify-between gap-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
                 <div className={cn(
                   "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider",
                   debt.type === 'lent' ? "bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400" : "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400"
@@ -344,11 +353,17 @@ const DebtTracker: React.FC = () => {
                   {t(debt.status)}
                 </div>
               </div>
-              <div className="flex gap-2">
-                <button onClick={() => setDeleteConfirmId(debt.id)} className="p-2 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-full text-slate-400 hover:text-red-500 transition-colors">
-                  <Trash2 className="w-5 h-5" />
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDeleteConfirmId(debt.id);
+                }}
+                className="relative z-20 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-red-500 dark:hover:bg-slate-700"
+                aria-label={t('delete')}
+              >
+                <Trash2 className="h-5 w-5 pointer-events-none" />
+              </button>
             </div>
 
             <div>
