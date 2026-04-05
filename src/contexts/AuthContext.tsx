@@ -1,21 +1,93 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, onAuthStateChanged } from 'firebase/auth';
 import { auth, db } from '../firebaseConfig';
-import { doc, getDoc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
+import {
+  getDefaultCategoriesForNewUser,
+  mergeUniqueCategoryLists,
+  UNIVERSAL_EXPENSE_CATEGORIES,
+  UNIVERSAL_INCOME_CATEGORIES,
+} from '../lib/professionData';
+
+/**
+ * Category initialization uses universal lists from `professionData` (single source of truth).
+ * Universal expense: Medicine, Hospital, Kacabazar, Sukna Bazar, Family Entertainment,
+ * Credit Card Bill, Loan Installment, Shopping, Food, Gift, Utilities, Mobile/Internet, Transport.
+ * These are merged into every new user doc and into profession saves (see ProfessionSelector / Settings).
+ */
+
+/**
+ * Adds universal expense categories to `users/{userId}` only when missing (case-insensitive).
+ * Safe for existing users; does not remove or rename existing entries.
+ * Pass `existingExpenseCategories` from a snapshot to avoid an extra getDoc.
+ */
+export async function initializeUniversalCategories(
+  userId: string,
+  existingExpenseCategories?: string[]
+): Promise<void> {
+  const userRef = doc(db, 'users', userId);
+  let existing: string[];
+  if (existingExpenseCategories !== undefined) {
+    existing = existingExpenseCategories;
+  } else {
+    let snap;
+    try {
+      snap = await getDoc(userRef);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.GET, `users/${userId}`);
+      return;
+    }
+    if (!snap.exists()) return;
+    existing = (snap.data().expenseCategories as string[] | undefined) ?? [];
+  }
+
+  const existingLower = new Set(
+    existing.map((c) => String(c).trim().toLowerCase()).filter(Boolean)
+  );
+  const missing = UNIVERSAL_EXPENSE_CATEGORIES.filter(
+    (u) => !existingLower.has(u.trim().toLowerCase())
+  );
+  if (missing.length === 0) return;
+
+  const merged = mergeUniqueCategoryLists([UNIVERSAL_EXPENSE_CATEGORIES, existing]);
+  try {
+    await updateDoc(userRef, { expenseCategories: merged });
+  } catch (e) {
+    handleFirestoreError(e, OperationType.UPDATE, `users/${userId}`);
+  }
+}
 
 interface AuthContextType {
-// ... (rest of the interface)
   user: User | null;
   loading: boolean;
-  userProfile: any | null;
+  userProfile: UserProfile | null;
+}
+
+/** Firestore user document shape (subset used in the app) */
+export interface UserProfile {
+  uid?: string;
+  displayName?: string | null;
+  email?: string | null;
+  photoURL?: string | null;
+  language?: string;
+  budgetLimit?: number;
+  phoneNumber?: string;
+  onboardingCompleted?: boolean;
+  profession?: string;
+  familyMembers?: string[];
+  incomeCategories?: string[];
+  expenseCategories?: string[];
+  role?: 'admin' | 'user';
+  fixedFinanceRolloverMonth?: string;
+  createdAt?: unknown;
 }
 
 const AuthContext = createContext<AuthContextType>({ user: null, loading: true, userProfile: null });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [userProfile, setUserProfile] = useState<any | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -33,10 +105,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const userDocRef = doc(db, 'users', user.uid);
         unsubscribeProfile = onSnapshot(userDocRef, (docSnap) => {
           if (docSnap.exists()) {
-            setUserProfile(docSnap.data());
+            const profile = docSnap.data() as UserProfile;
+            setUserProfile(profile);
+            void initializeUniversalCategories(user.uid, profile.expenseCategories);
           } else {
-            // Create profile if it doesn't exist
-            const newProfile = {
+            // Create profile if it doesn't exist — universals + starter lists, deduped
+            const initialCats = getDefaultCategoriesForNewUser();
+            const incomeCategories = mergeUniqueCategoryLists([
+              UNIVERSAL_INCOME_CATEGORIES,
+              initialCats.income,
+            ]);
+            const expenseCategories = mergeUniqueCategoryLists([
+              UNIVERSAL_EXPENSE_CATEGORIES,
+              initialCats.expense,
+            ]);
+            const newProfile: Record<string, unknown> = {
               uid: user.uid,
               displayName: user.displayName,
               email: user.email,
@@ -44,12 +127,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               language: 'en',
               budgetLimit: 0,
               phoneNumber: '',
+              profession: '',
               onboardingCompleted: false,
               familyMembers: ['Self'],
-              incomeCategories: ['Salary', 'Business', 'Gift', 'Investment', 'Other'],
-              expenseCategories: ['Food', 'Rent', 'Utilities', 'Transport', 'Entertainment', 'Health', 'Education', 'Shopping', 'Other'],
+              incomeCategories,
+              expenseCategories,
               createdAt: serverTimestamp(),
-              role: user.email === 'chotan4480@gmail.com' ? 'admin' : 'user'
+              role: user.email === 'chotan4480@gmail.com' ? 'admin' : 'user',
             };
             setDoc(userDocRef, newProfile).catch(err => {
               handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}`);

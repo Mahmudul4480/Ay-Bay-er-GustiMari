@@ -20,6 +20,14 @@ export function parseMonthKey(monthKey: string): { year: number; monthIndex: num
   return { year, monthIndex: month - 1 };
 }
 
+/** Shift a YYYY-MM key by a number of months (negative = past). */
+export function addMonthsToMonthKey(monthKey: string, deltaMonths: number): string | null {
+  const parsed = parseMonthKey(monthKey);
+  if (!parsed) return null;
+  const d = new Date(parsed.year, parsed.monthIndex + deltaMonths, 1);
+  return getMonthKeyFromDate(d);
+}
+
 /** Clamp scheduled day to a valid calendar day in that month */
 export function dateForScheduledDayInMonth(year: number, monthIndex: number, dayOfMonth: number): Date {
   const lastDay = new Date(year, monthIndex + 1, 0).getDate();

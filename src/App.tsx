@@ -2,22 +2,72 @@ import React from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LocalizationProvider, useLocalization } from './contexts/LocalizationContext';
 import { TransactionFeedbackProvider } from './contexts/TransactionFeedbackContext';
+import { TransactionsProvider } from './hooks/useTransactions';
+import { MonthSelectionProvider } from './contexts/MonthSelectionContext';
 import { loginWithGoogle, logout, isInAppBrowser, isConfigValid } from './firebaseConfig';
-import { LogIn, LogOut, LayoutDashboard, CreditCard, Settings, Plus, Menu, X, Globe, Sun, Moon, AlertTriangle, Users } from 'lucide-react';
+import { LogOut, LayoutDashboard, CreditCard, Settings, Plus, Menu, X, Sun, Moon, AlertTriangle, Users, ArrowLeft, Home, Megaphone } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
-import Dashboard from './components/Dashboard';
+import Dashboard from './pages/Dashboard';
 import TransactionForm from './components/TransactionForm';
 import TransactionList from './components/TransactionList';
 import DebtTracker from './components/DebtTracker';
 import SettingsPage from './components/SettingsPage';
 import Onboarding from './components/Onboarding';
+import ProfessionSelector from './components/ProfessionSelector';
 import AdminDashboard from './pages/AdminDashboard';
+import AdminEngagement from './pages/AdminEngagement';
+import BlogPage from './pages/BlogPage';
+import WelcomeOverlay from './components/WelcomeOverlay';
+import { useFcmToken } from './hooks/useFcmToken';
+
+const ADMIN_EMAIL = 'chotan4480@gmail.com';
+
+function needsProfession(profile: { profession?: string } | null): boolean {
+  if (!profile) return true;
+  const p = profile.profession;
+  return p == null || String(p).trim() === '';
+}
+
+// ── Hash-based blog routing ──────────────────────────────────────────────────
+function useBlogRoute() {
+  const [blogId, setBlogId] = React.useState<string | null>(() => {
+    const hash = window.location.hash; // e.g. "#/blog/abc123"
+    const match = hash.match(/^#\/blog\/([^/?#]+)/);
+    return match ? match[1] : null;
+  });
+
+  React.useEffect(() => {
+    const onHashChange = () => {
+      const hash = window.location.hash;
+      const match = hash.match(/^#\/blog\/([^/?#]+)/);
+      setBlogId(match ? match[1] : null);
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  const closeBlog = () => {
+    window.location.hash = '';
+    setBlogId(null);
+  };
+
+  return { blogId, closeBlog };
+}
 
 const AppContent: React.FC = () => {
   const { user, loading, userProfile } = useAuth();
   const { language, setLanguage, t } = useLocalization();
   const [activeTab, setActiveTab] = React.useState('dashboard');
+
+  // Register FCM token & foreground listener
+  useFcmToken();
+
+  // Blog deep-link routing
+  const { blogId, closeBlog } = useBlogRoute();
+  if (blogId) {
+    return <BlogPage blogId={blogId} onBack={closeBlog} />;
+  }
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = React.useState(false);
   const [isDarkMode, setIsDarkMode] = React.useState(() => {
@@ -202,7 +252,7 @@ const AppContent: React.FC = () => {
               <p className="text-xs text-amber-100 leading-relaxed">
                 {language === 'bn' 
                   ? 'একটি নিরবচ্ছিন্ন লগইনের জন্য, অনুগ্রহ করে আপনার ফোনের ডিফল্ট ব্রাউজারে (Chrome/Safari) এই লিংকটি ওপেন করুন (উপরে ডানদিকে ৩-ডট মেনুর মাধ্যমে)।' 
-                  : 'For a seamless login, please open this link in your phone\'s default browser (Chrome/Safari) via the 3-dot menu at the top right.'}
+                  : 'For a seamless login, please open this link in your default browser (Chrome/Safari) via the 3-dot menu.'}
               </p>
             </motion.div>
           )}
@@ -236,9 +286,15 @@ const AppContent: React.FC = () => {
     );
   }
 
+  if (userProfile && needsProfession(userProfile)) {
+    return <ProfessionSelector />;
+  }
+
   if (userProfile && !userProfile.onboardingCompleted) {
     return <Onboarding />;
   }
+
+  const isAdminUser = user?.email === ADMIN_EMAIL && userProfile?.role === 'admin';
 
   const tabs = [
     { id: 'dashboard', label: t('dashboard'), icon: LayoutDashboard },
@@ -246,38 +302,55 @@ const AppContent: React.FC = () => {
     { id: 'settings', label: t('settings'), icon: Settings },
   ];
 
-  if (userProfile?.role === 'admin') {
-    tabs.push({ id: 'admin', label: 'Admin', icon: Users });
+  if (isAdminUser) {
+    tabs.push({ id: 'admin', label: 'Analytics', icon: Users });
+    tabs.push({ id: 'engagement', label: 'Engage', icon: Megaphone });
   }
+
+  const goDashboard = () => {
+    setActiveTab('dashboard');
+    setIsSidebarOpen(false);
+  };
 
   return (
     <div className="flex min-h-screen min-w-0 flex-col bg-slate-50 transition-colors dark:bg-slate-900 md:flex-row">
       {/* Mobile Header */}
-      <header className="md:hidden bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-4 flex items-center justify-between sticky top-0 z-40 transition-colors">
-        <div className="logo-container">
-          <motion.img
-            src="https://i.postimg.cc/K8yGqVdy/logo-png.png"
-            alt="Logo"
-            className="w-32 h-auto object-contain cursor-pointer logo-glow"
-            animate={{
-              y: [0, -3, 0],
-            }}
-            transition={{
-              duration: 3,
-              repeat: Infinity,
-              ease: "easeInOut"
-            }}
-            whileHover={{
-              rotate: [0, -5, 5, -5, 5, 0],
-              transition: {
-                duration: 0.2,
-                repeat: Infinity
-              }
-            }}
-            whileTap={{ scale: 0.9 }}
-          />
+      <header className="sticky top-0 z-40 flex items-center justify-between border-b border-slate-200 bg-white p-3 transition-colors dark:border-slate-700 dark:bg-slate-800 md:hidden">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {(activeTab === 'transactions' || activeTab === 'settings') && (
+            <button
+              type="button"
+              onClick={goDashboard}
+              className="flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-bold text-slate-700 transition-all active:scale-95 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
+              aria-label="Back to dashboard"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <Home className="h-4 w-4" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={goDashboard}
+            className="logo-container min-w-0 text-left"
+            aria-label="Go to dashboard"
+          >
+            <motion.img
+              src="https://i.postimg.cc/K8yGqVdy/logo-png.png"
+              alt="Ay Bay Er GustiMari"
+              className="logo-glow h-auto max-h-10 w-auto max-w-[9rem] object-contain"
+              animate={{
+                y: [0, -3, 0],
+              }}
+              transition={{
+                duration: 3,
+                repeat: Infinity,
+                ease: 'easeInOut',
+              }}
+              whileTap={{ scale: 0.95 }}
+            />
+          </button>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2">
           <button 
             onClick={() => setIsDarkMode(!isDarkMode)} 
             className="flex items-center gap-2 p-2 px-3 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-xl transition-all border border-slate-200 dark:border-slate-600 shadow-sm active:scale-95"
@@ -292,6 +365,22 @@ const AppContent: React.FC = () => {
         </div>
       </header>
 
+      <AnimatePresence>
+        {isSidebarOpen && !isMdUp && (
+          <motion.button
+            type="button"
+            key="sidebar-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-40 bg-slate-900/60 backdrop-blur-sm md:hidden"
+            aria-label="Close menu"
+            onClick={() => setIsSidebarOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+
       {/* Sidebar */}
       <AnimatePresence>
         {(isSidebarOpen || isMdUp) && (
@@ -304,30 +393,41 @@ const AppContent: React.FC = () => {
               !isSidebarOpen && 'hidden md:flex'
             )}
           >
-            <div className="p-6 flex flex-col items-center gap-4">
-              <div className="logo-container">
+            <div className="flex flex-col items-center gap-4 p-6">
+              <button
+                type="button"
+                onClick={goDashboard}
+                className="logo-container hidden w-full md:block"
+                aria-label="Go to dashboard"
+              >
                 <motion.img
                   src="https://i.postimg.cc/K8yGqVdy/logo-png.png"
-                  alt="Logo"
-                  className="w-48 h-auto object-contain cursor-pointer hidden md:block logo-glow"
+                  alt="Ay Bay Er GustiMari"
+                  className="logo-glow mx-auto h-auto w-48 cursor-pointer object-contain"
                   animate={{
                     y: [0, -3, 0],
                   }}
                   transition={{
                     duration: 3,
                     repeat: Infinity,
-                    ease: "easeInOut"
+                    ease: 'easeInOut',
                   }}
-                  whileHover={{
-                    rotate: [0, -5, 5, -5, 5, 0],
-                    transition: {
-                      duration: 0.2,
-                      repeat: Infinity
-                    }
-                  }}
-                  whileTap={{ scale: 0.9 }}
+                  whileTap={{ scale: 0.95 }}
                 />
-              </div>
+              </button>
+              <button
+                type="button"
+                onClick={goDashboard}
+                className="logo-container w-full md:hidden"
+                aria-label="Go to dashboard"
+              >
+                <motion.img
+                  src="https://i.postimg.cc/K8yGqVdy/logo-png.png"
+                  alt="Ay Bay Er GustiMari"
+                  className="logo-glow mx-auto h-auto max-w-[10rem] cursor-pointer object-contain"
+                  whileTap={{ scale: 0.95 }}
+                />
+              </button>
               <button 
                 onClick={() => setIsDarkMode(!isDarkMode)} 
                 className="w-full flex items-center justify-between gap-3 p-3 px-4 bg-slate-50 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-all border border-slate-100 dark:border-slate-700 shadow-sm group"
@@ -390,7 +490,13 @@ const AppContent: React.FC = () => {
         {activeTab === 'transactions' && <TransactionList />}
         {activeTab === 'debts' && <DebtTracker />}
         {activeTab === 'settings' && <SettingsPage />}
-        {activeTab === 'admin' && userProfile?.role === 'admin' && <AdminDashboard onBack={() => setActiveTab('dashboard')} />}
+        {activeTab === 'admin' && isAdminUser && <AdminDashboard onBack={() => setActiveTab('dashboard')} />}
+        {activeTab === 'engagement' && isAdminUser && (
+          <AdminEngagement
+            currentUserEmail={user?.email ?? ''}
+            onBack={() => setActiveTab('dashboard')}
+          />
+        )}
       </main>
 
       {/* Floating Add Button */}
@@ -417,9 +523,14 @@ const AppContent: React.FC = () => {
 export default function App() {
   return (
     <AuthProvider>
+      <WelcomeOverlay />
       <LocalizationProvider>
         <TransactionFeedbackProvider>
-          <AppContent />
+          <MonthSelectionProvider>
+            <TransactionsProvider>
+              <AppContent />
+            </TransactionsProvider>
+          </MonthSelectionProvider>
         </TransactionFeedbackProvider>
       </LocalizationProvider>
     </AuthProvider>

@@ -2,6 +2,7 @@ import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, setPersistence, browserLocalPersistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getAnalytics } from "firebase/analytics";
+import { getMessaging, isSupported, type Messaging } from "firebase/messaging";
 
 // Import the Firebase configuration from the generated file
 import firebaseConfig from "../firebase-applet-config.json";
@@ -19,7 +20,7 @@ if (!isConfigValid && typeof window !== 'undefined') {
 // Initialize Firebase only if config is valid, or provide a dummy app to prevent crashes
 const app = isConfigValid 
   ? initializeApp(firebaseConfig) 
-  : initializeApp({ apiKey: "dummy", projectId: "dummy", appId: "dummy" }); // Minimal dummy config to prevent SDK crashes
+  : initializeApp({ apiKey: "dummy", projectId: "dummy", appId: "dummy" });
 
 const analytics = isConfigValid && typeof window !== 'undefined' && firebaseConfig.measurementId 
   ? getAnalytics(app) 
@@ -33,6 +34,30 @@ setPersistence(auth, browserLocalPersistence).catch((err) => {
 // Use the firestoreDatabaseId if provided in the config, otherwise default
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || "(default)");
 export const googleProvider = new GoogleAuthProvider();
+
+// ────────────────────────────────────────────────
+// Firebase Cloud Messaging (lazy-loaded, browser-only)
+// ────────────────────────────────────────────────
+let _messaging: Messaging | null = null;
+
+/**
+ * Returns the Firebase Messaging instance, or null if the browser doesn't
+ * support FCM (e.g. Safari without notification support, service-worker
+ * blocked environments, etc.).
+ */
+export const getFirebaseMessaging = async (): Promise<Messaging | null> => {
+  if (!isConfigValid || typeof window === 'undefined') return null;
+  if (_messaging) return _messaging;
+  try {
+    const supported = await isSupported();
+    if (!supported) return null;
+    _messaging = getMessaging(app);
+    return _messaging;
+  } catch (err) {
+    console.warn("Firebase Messaging not available:", err);
+    return null;
+  }
+};
 
 export const isInAppBrowser = () => {
   if (typeof window === 'undefined') return false;
@@ -53,4 +78,5 @@ export const loginWithGoogle = () => {
 
 export const logout = () => signOut(auth);
 
+export { analytics };
 export default app;

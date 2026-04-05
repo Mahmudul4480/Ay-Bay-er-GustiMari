@@ -7,7 +7,7 @@ import { collection, addDoc, updateDoc, doc, serverTimestamp, deleteDoc, query, 
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Trash2, CheckCircle, Clock, User, DollarSign, Calendar, X, Phone, Filter, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, Clock, User, DollarSign, Calendar, X, Phone, ArrowUp, ArrowDown, AlertTriangle, Edit2 } from 'lucide-react';
 
 import { convertBengaliToAscii, sanitizeDecimal } from '../lib/numberUtils';
 import { useTransactionFeedback } from '../contexts/TransactionFeedbackContext';
@@ -22,6 +22,19 @@ const DebtTracker: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<'all' | 'paid' | 'unpaid'>('all');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+
+  // ── Edit state ──────────────────────────────────────────────────────────────
+  const [editingDebt, setEditingDebt] = useState<any | null>(null);
+  const [editFormData, setEditFormData] = useState({
+    personName: '',
+    amount: '',
+    type: 'lent' as 'lent' | 'borrowed',
+    description: '',
+    dueDate: new Date().toISOString().split('T')[0],
+    phoneNumber: '',
+  });
+  const [isEditSubmitting, setIsEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     personName: '',
@@ -205,6 +218,104 @@ const DebtTracker: React.FC = () => {
     }
   };
 
+  // ── Edit handlers ─────────────────────────────────────────────────────────
+  const openEditModal = (debt: any) => {
+    setEditingDebt(debt);
+    setEditFormData({
+      personName: debt.personName,
+      amount: String(debt.amount),
+      type: debt.type,
+      description: debt.description || '',
+      dueDate:
+        debt.dueDate && typeof debt.dueDate.toDate === 'function'
+          ? debt.dueDate.toDate().toISOString().split('T')[0]
+          : new Date().toISOString().split('T')[0],
+      phoneNumber: debt.phoneNumber || '',
+    });
+    setEditError(null);
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEditError(null);
+
+    const amountNum = parseFloat(editFormData.amount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      setEditError('Amount must be a positive number.');
+      return;
+    }
+
+    if (!editFormData.personName.trim()) {
+      setEditError('Person name is required.');
+      return;
+    }
+
+    setIsEditSubmitting(true);
+    try {
+      const debt = editingDebt;
+
+      // 1. Update the debt document
+      await updateDoc(doc(db, 'debts', debt.id), {
+        personName: editFormData.personName,
+        amount: amountNum,
+        type: editFormData.type,
+        description: editFormData.description,
+        dueDate: new Date(editFormData.dueDate),
+        phoneNumber: editFormData.phoneNumber,
+      });
+
+      // 2. Delete all linked transactions so the balance recalculates correctly
+      const q = query(collection(db, 'transactions'), where('debtId', '==', debt.id));
+      const snap = await getDocs(q);
+      await Promise.all(
+        snap.docs
+          .filter((d) => d.data().userId === user!.uid)
+          .map((d) => deleteDoc(d.ref))
+      );
+
+      // 3. Re-create the initial transaction
+      await addDoc(collection(db, 'transactions'), {
+        userId: user!.uid,
+        amount: amountNum,
+        type: editFormData.type === 'lent' ? 'expense' : 'income',
+        category: editFormData.type === 'lent' ? 'Debt Given' : 'Debt Taken',
+        date: serverTimestamp(),
+        note: `${editFormData.type === 'lent' ? 'Lent to' : 'Borrowed from'} ${editFormData.personName}`,
+        familyMember: 'Self',
+        isFixed: false,
+        debtId: debt.id,
+        createdAt: serverTimestamp(),
+      });
+
+      // 4. If the debt was already paid, recreate the settlement transaction too
+      if (debt.status === 'paid') {
+        const settlementType = editFormData.type === 'lent' ? 'debt_repayment' : 'expense';
+        const settlementCategory = editFormData.type === 'lent' ? 'Debit Settlement' : 'Debit Reversal';
+        await addDoc(collection(db, 'transactions'), {
+          userId: user!.uid,
+          amount: amountNum,
+          type: settlementType,
+          category: settlementCategory,
+          date: serverTimestamp(),
+          note:
+            editFormData.type === 'lent'
+              ? `Debit Settlement (Collected from ${editFormData.personName})`
+              : `Debit Reversal (Pay to ${editFormData.personName})`,
+          familyMember: 'Self',
+          isFixed: false,
+          debtId: debt.id,
+          createdAt: serverTimestamp(),
+        });
+      }
+
+      setEditingDebt(null);
+    } catch (err: any) {
+      setEditError(err.message || 'An error occurred while saving.');
+    } finally {
+      setIsEditSubmitting(false);
+    }
+  };
+
   const netDebt = debts.reduce((acc, debt) => {
     if (debt.status === 'paid') return acc;
     return debt.type === 'lent' ? acc + debt.amount : acc - debt.amount;
@@ -242,7 +353,10 @@ const DebtTracker: React.FC = () => {
   return (
     <div className="space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <h2 className="text-3xl font-bold text-slate-800 dark:text-white">{t('netDebt')}</h2>
+        <div>
+          <h2 className="text-3xl font-bold text-slate-800 dark:text-white">{t('debtTracker')}</h2>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t('debtTotalsCumulative')}</p>
+        </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center neon-card p-1">
             <button
@@ -337,7 +451,7 @@ const DebtTracker: React.FC = () => {
               aria-hidden
             />
 
-            <div className="relative z-10 flex items-center justify-between gap-2">
+              <div className="relative z-10 flex items-center justify-between gap-2">
               <div className="flex min-w-0 flex-1 items-center gap-2">
                 <div className={cn(
                   "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider",
@@ -353,17 +467,27 @@ const DebtTracker: React.FC = () => {
                   {t(debt.status)}
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setDeleteConfirmId(debt.id);
-                }}
-                className="relative z-20 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-red-500 dark:hover:bg-slate-700"
-                aria-label={t('delete')}
-              >
-                <Trash2 className="h-5 w-5 pointer-events-none" />
-              </button>
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); openEditModal(debt); }}
+                  className="relative z-20 inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-500 dark:hover:bg-blue-900/30"
+                  aria-label="Edit"
+                >
+                  <Edit2 className="h-4 w-4 pointer-events-none" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeleteConfirmId(debt.id);
+                  }}
+                  className="relative z-20 inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/30"
+                  aria-label={t('delete')}
+                >
+                  <Trash2 className="h-4 w-4 pointer-events-none" />
+                </button>
+              </div>
             </div>
 
             <div>
@@ -577,6 +701,156 @@ const DebtTracker: React.FC = () => {
                   {t('delete')}
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Edit Debt Modal ───────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {editingDebt && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !isEditSubmitting && setEditingDebt(null)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 24 }}
+              className="relative w-full max-w-lg overflow-hidden rounded-[2rem] shadow-2xl"
+              style={{
+                background: 'linear-gradient(145deg, rgba(255,255,255,0.97) 0%, rgba(248,250,252,0.97) 100%)',
+                boxShadow: '0 32px 80px -10px rgba(15,23,42,0.25), inset 0 1px 0 rgba(255,255,255,0.8)',
+              }}
+            >
+              {/* Gradient header */}
+              <div className="flex items-center justify-between bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-white">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20 backdrop-blur-sm">
+                    <Edit2 className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-black">Edit Debt Entry</h2>
+                    <p className="text-xs text-blue-100">Changes recalculate balance in real-time</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => !isEditSubmitting && setEditingDebt(null)}
+                  className="rounded-full p-2 hover:bg-white/15 transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {editError && (
+                <div className="mx-6 mt-5 flex items-center gap-3 rounded-2xl border border-red-100 bg-red-50 p-4 text-sm text-red-600 dark:border-red-900/30 dark:bg-red-900/20 dark:text-red-400">
+                  <AlertTriangle className="h-5 w-5 shrink-0" />
+                  <p className="font-medium">{editError}</p>
+                </div>
+              )}
+
+              <form onSubmit={handleEditSubmit} className="space-y-5 p-6">
+                {/* Type toggle */}
+                <div className="flex rounded-2xl bg-slate-100 p-1 dark:bg-slate-700">
+                  {(['lent', 'borrowed'] as const).map((tp) => (
+                    <button
+                      key={tp}
+                      type="button"
+                      onClick={() => setEditFormData((p) => ({ ...p, type: tp }))}
+                      className={cn(
+                        'flex-1 rounded-xl py-3 text-sm font-bold transition-all',
+                        editFormData.type === tp
+                          ? tp === 'lent'
+                            ? 'bg-white text-green-600 shadow-sm dark:bg-slate-600 dark:text-green-400'
+                            : 'bg-white text-red-600 shadow-sm dark:bg-slate-600 dark:text-red-400'
+                          : 'text-slate-500 dark:text-slate-400'
+                      )}
+                    >
+                      {tp === 'lent' ? t('lent') : t('borrowed')}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Name + Phone */}
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase tracking-wide text-slate-500">{t('personName')}</label>
+                    <input
+                      type="text"
+                      required
+                      value={editFormData.personName}
+                      onChange={(e) => setEditFormData((p) => ({ ...p, personName: e.target.value }))}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase tracking-wide text-slate-500">{t('phoneNumber')}</label>
+                    <input
+                      type="tel"
+                      value={editFormData.phoneNumber}
+                      onChange={(e) => setEditFormData((p) => ({ ...p, phoneNumber: e.target.value }))}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                {/* Amount + Due Date */}
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase tracking-wide text-slate-500">{t('amount')}</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      required
+                      value={editFormData.amount}
+                      onChange={(e) => {
+                        const v = sanitizeDecimal(e.target.value);
+                        // Block leading minus signs
+                        if (!v.startsWith('-')) setEditFormData((p) => ({ ...p, amount: v }));
+                      }}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase tracking-wide text-slate-500">{t('dueDate')}</label>
+                    <input
+                      type="date"
+                      required
+                      value={editFormData.dueDate}
+                      onChange={(e) => setEditFormData((p) => ({ ...p, dueDate: e.target.value }))}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                {/* Note */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold uppercase tracking-wide text-slate-500">{t('note')}</label>
+                  <textarea
+                    value={editFormData.description}
+                    onChange={(e) => setEditFormData((p) => ({ ...p, description: e.target.value }))}
+                    rows={3}
+                    className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isEditSubmitting}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 py-4 font-bold text-white shadow-lg shadow-blue-500/25 transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-60"
+                >
+                  {isEditSubmitting ? (
+                    <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  ) : (
+                    <CheckCircle className="h-5 w-5" />
+                  )}
+                  Save Changes
+                </button>
+              </form>
             </motion.div>
           </div>
         )}

@@ -1,12 +1,12 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocalization, translations } from '../contexts/LocalizationContext';
 import { useTransactions, FixedFinance } from '../hooks/useTransactions';
 import { db } from '../firebaseConfig';
-import { doc, updateDoc, collection, addDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
+import { doc, updateDoc, collection, addDoc, serverTimestamp, deleteDoc, writeBatch } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { motion } from 'motion/react';
-import { Download, Upload, FileText, Save, Globe, Shield, Bell, AlertCircle, User, X, Plus } from 'lucide-react';
+import { Download, Upload, FileText, Save, Globe, Shield, Bell, AlertCircle, User, X, Plus, Briefcase, Loader2, RotateCcw } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -17,6 +17,15 @@ import {
   embedAnekBanglaFont,
   escapeHtml,
 } from '../lib/pdfStatement';
+import {
+  PROFESSIONS,
+  type ProfessionId,
+  getDefaultCategoriesForProfession,
+  getProfessionLabel,
+  mergeExpenseCategoriesWithUniversals,
+  mergeIncomeCategoriesWithUniversals,
+} from '../lib/professionData';
+import { getCurrentMonthKey, isTransactionInMonthKey, parseMonthKey } from '../lib/monthUtils';
 
 const SettingsPage: React.FC = () => {
   const { user, userProfile } = useAuth();
@@ -114,6 +123,80 @@ const SettingsPage: React.FC = () => {
   const [newMemberInput, setNewMemberInput] = useState('');
   const [newIncomeCategoryInput, setNewIncomeCategoryInput] = useState('');
   const [newExpenseCategoryInput, setNewExpenseCategoryInput] = useState('');
+
+  const [pendingProfession, setPendingProfession] = useState<ProfessionId | null>(null);
+  const [resetCategoriesOnProfessionChange, setResetCategoriesOnProfessionChange] = useState(true);
+  const [savingProfession, setSavingProfession] = useState(false);
+  const [isResettingMonth, setIsResettingMonth] = useState(false);
+
+  const savedProfessionId =
+    userProfile?.profession && PROFESSIONS.some((x) => x.id === userProfile.profession)
+      ? (userProfile.profession as ProfessionId)
+      : null;
+
+  useEffect(() => {
+    const p = userProfile?.profession;
+    if (p && PROFESSIONS.some((x) => x.id === p)) {
+      setPendingProfession(p as ProfessionId);
+    } else {
+      setPendingProfession(null);
+    }
+  }, [userProfile?.profession]);
+
+  useEffect(() => {
+    if (
+      pendingProfession != null &&
+      savedProfessionId != null &&
+      pendingProfession !== savedProfessionId
+    ) {
+      setResetCategoriesOnProfessionChange(true);
+    }
+  }, [pendingProfession, savedProfessionId]);
+
+  const sameProfessionAsSaved =
+    savedProfessionId != null &&
+    pendingProfession != null &&
+    pendingProfession === savedProfessionId;
+
+  const canSaveProfession =
+    pendingProfession != null &&
+    (!sameProfessionAsSaved || resetCategoriesOnProfessionChange);
+
+  const handleSaveProfession = async () => {
+    if (!user || pendingProfession == null || !canSaveProfession) return;
+
+    setSavingProfession(true);
+    try {
+      const payload: Record<string, unknown> = {};
+
+      if (!sameProfessionAsSaved) {
+        payload.profession = pendingProfession;
+      }
+
+      if (resetCategoriesOnProfessionChange) {
+        const { income, expense } = getDefaultCategoriesForProfession(pendingProfession);
+        payload.incomeCategories = income;
+        payload.expenseCategories = expense;
+      } else if (!sameProfessionAsSaved) {
+        payload.incomeCategories = mergeIncomeCategoriesWithUniversals(userProfile?.incomeCategories);
+        payload.expenseCategories = mergeExpenseCategoriesWithUniversals(userProfile?.expenseCategories);
+      }
+
+      await updateDoc(doc(db, 'users', user.uid), payload);
+      setAlertModal({
+        title: 'Saved',
+        message: resetCategoriesOnProfessionChange
+          ? sameProfessionAsSaved
+            ? 'Categories were reset to defaults for your profession.'
+            : 'Profession and categories were updated.'
+          : 'Profession was updated. Your category lists were kept.',
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+    } finally {
+      setSavingProfession(false);
+    }
+  };
 
   const handleAddMember = async () => {
     const trimmed = newMemberInput.trim();
@@ -278,6 +361,50 @@ const SettingsPage: React.FC = () => {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleResetCurrentMonthClick = () => {
+    const targetKey = getCurrentMonthKey();
+    const parsed = parseMonthKey(targetKey);
+    const monthLabel =
+      parsed != null
+        ? new Date(parsed.year, parsed.monthIndex, 1).toLocaleString(
+            language === 'bn' ? 'bn-BD' : 'en-US',
+            { month: 'long', year: 'numeric' }
+          )
+        : targetKey;
+    setConfirmModal({
+      title: t('resetCurrentMonthTitle'),
+      message: t('resetCurrentMonthMessage').replace('{month}', monthLabel),
+      onConfirm: async () => {
+        setConfirmModal(null);
+        if (!user) return;
+        setIsResettingMonth(true);
+        try {
+          const toRemove = transactions.filter(
+            (tx) =>
+              (tx.type === 'income' || tx.type === 'expense') &&
+              isTransactionInMonthKey(tx, targetKey)
+          );
+          if (toRemove.length === 0) {
+            setAlertModal({ title: t('info'), message: t('resetCurrentMonthNothing') });
+            return;
+          }
+          const CHUNK = 500;
+          for (let i = 0; i < toRemove.length; i += CHUNK) {
+            const batch = writeBatch(db);
+            const slice = toRemove.slice(i, i + CHUNK);
+            slice.forEach((tx) => batch.delete(doc(db, 'transactions', tx.id)));
+            await batch.commit();
+          }
+          setAlertModal({ title: t('success'), message: t('resetCurrentMonthDone') });
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, 'transactions');
+        } finally {
+          setIsResettingMonth(false);
+        }
+      },
+    });
   };
 
   const exportData = () => {
@@ -568,8 +695,8 @@ const SettingsPage: React.FC = () => {
               onChange={(e) => {
                 const val = e.target.value;
                 const sanitized = sanitizeDecimal(val);
-                console.log('Budget Limit Input:', { val, sanitized });
-                setBudgetLimit(sanitized);
+                const n = parseFloat(sanitized);
+                setBudgetLimit(sanitized === '' || Number.isNaN(n) ? 0 : n);
               }}
               placeholder="Enter monthly limit"
               className="w-full p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100"
@@ -583,6 +710,150 @@ const SettingsPage: React.FC = () => {
               {t('save')}
             </button>
           </div>
+        </motion.div>
+
+        {/* Reset current calendar month (transactions only) */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="space-y-4 rounded-3xl border border-amber-200 bg-white p-6 shadow-sm dark:border-amber-900/40 dark:bg-slate-800 sm:p-8 md:col-span-2"
+        >
+          <div className="flex items-center gap-3">
+            <RotateCcw className="h-6 w-6 shrink-0 text-amber-600" />
+            <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">{t('resetCurrentMonth')}</h3>
+          </div>
+          <p className="text-sm text-slate-600 dark:text-slate-400">{t('resetCurrentMonthHint')}</p>
+          <button
+            type="button"
+            disabled={!user || isResettingMonth}
+            onClick={handleResetCurrentMonthClick}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-600 px-6 py-4 font-bold text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
+          >
+            {isResettingMonth ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <RotateCcw className="h-5 w-5" />
+            )}
+            {t('resetCurrentMonth')}
+          </button>
+        </motion.div>
+
+        {/* Update Profession */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="space-y-6 rounded-3xl border border-slate-100 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800 sm:p-8 md:col-span-2"
+        >
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-center gap-3">
+              <Briefcase className="h-6 w-6 shrink-0 text-blue-600" />
+              <div>
+                <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">Update Profession</h3>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Current:{' '}
+                  <span className="font-semibold text-slate-700 dark:text-slate-200">
+                    {getProfessionLabel(userProfile?.profession)}
+                  </span>
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Quick select
+            </label>
+            <select
+              value={pendingProfession ?? ''}
+              onChange={(e) => {
+                const v = e.target.value;
+                setPendingProfession(v ? (v as ProfessionId) : null);
+              }}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+            >
+              <option value="">Choose a profession…</option>
+              {PROFESSIONS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            Or tap a card below (same as onboarding).
+          </p>
+
+          <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-5">
+            {PROFESSIONS.map((p) => {
+              const Icon = p.icon;
+              const isSel = pendingProfession === p.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setPendingProfession(p.id)}
+                  className={cn(
+                    'flex flex-col items-center rounded-2xl border-2 p-3 text-center transition-all sm:p-4',
+                    p.cardClass,
+                    isSel
+                      ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-900'
+                      : 'hover:opacity-95'
+                  )}
+                >
+                  <div
+                    className={cn(
+                      'mb-2 flex h-10 w-10 items-center justify-center rounded-lg sm:h-11 sm:w-11 sm:rounded-xl',
+                      p.iconWrapClass
+                    )}
+                  >
+                    <Icon className="h-5 w-5 sm:h-6 sm:w-6" strokeWidth={2} />
+                  </div>
+                  <span className="text-[11px] font-bold leading-tight text-slate-800 dark:text-slate-100 sm:text-xs">
+                    {p.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-600 dark:bg-slate-900/50">
+            <input
+              type="checkbox"
+              className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              checked={resetCategoriesOnProfessionChange}
+              onChange={(e) => setResetCategoriesOnProfessionChange(e.target.checked)}
+            />
+            <span className="text-sm text-slate-700 dark:text-slate-300">
+              <span className="font-bold">Reset categories</span> — replace my income and expense category lists with the
+              defaults for the selected profession. Uncheck to keep your current lists when you only change profession, or
+              to update profession without touching categories.
+            </span>
+          </label>
+
+          <button
+            type="button"
+            disabled={!canSaveProfession || savingProfession}
+            onClick={handleSaveProfession}
+            className={cn(
+              'flex w-full items-center justify-center gap-2 rounded-2xl py-4 font-bold text-white transition-all',
+              canSaveProfession && !savingProfession
+                ? 'bg-blue-600 hover:bg-blue-700 active:scale-[0.99]'
+                : 'cursor-not-allowed bg-slate-300 dark:bg-slate-600'
+            )}
+          >
+            {savingProfession ? (
+              <>
+                <Loader2 className="h-5 w-5 animate-spin" />
+                Saving…
+              </>
+            ) : (
+              <>
+                <Save className="h-5 w-5" />
+                Save profession
+              </>
+            )}
+          </button>
         </motion.div>
 
         {/* Backup & Restore */}

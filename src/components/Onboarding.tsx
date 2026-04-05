@@ -7,6 +7,11 @@ import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { motion, AnimatePresence } from 'motion/react';
 import { Phone, TrendingUp, TrendingDown, Plus, Trash2, ArrowRight, CheckCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
+import {
+  getDefaultCategoriesForProfession,
+  mergeUniqueCategoryLists,
+  type ProfessionId,
+} from '../lib/professionData';
 
 const Onboarding: React.FC = () => {
   const { user, userProfile } = useAuth();
@@ -37,24 +42,13 @@ const Onboarding: React.FC = () => {
     if (!user) return;
     setIsSubmitting(true);
     try {
-      // 1. Prepare new categories from fixed finances
-      const currentIncomeCategories = userProfile?.incomeCategories || ['Salary', 'Business', 'Gift', 'Investment', 'Other'];
-      const currentExpenseCategories = userProfile?.expenseCategories || ['Food', 'Rent', 'Utilities', 'Transport', 'Entertainment', 'Health', 'Education', 'Shopping', 'Other'];
-      
-      const newIncomeCategories = [...currentIncomeCategories];
-      const newExpenseCategories = [...currentExpenseCategories];
-
-      fixedIncomes.forEach(income => {
-        if (income.name && !newIncomeCategories.includes(income.name)) {
-          newIncomeCategories.push(income.name);
-        }
-      });
-
-      fixedExpenses.forEach(expense => {
-        if (expense.name && !newExpenseCategories.includes(expense.name)) {
-          newExpenseCategories.push(expense.name);
-        }
-      });
+      // 1. Merge universal + profession defaults, then add fixed-finance category names
+      const profId = (userProfile?.profession as ProfessionId) || 'student';
+      const base = getDefaultCategoriesForProfession(profId);
+      const extraIncome = fixedIncomes.map((i) => i.name.trim()).filter(Boolean);
+      const extraExpense = fixedExpenses.map((e) => e.name.trim()).filter(Boolean);
+      const newIncomeCategories = mergeUniqueCategoryLists([base.income, extraIncome]);
+      const newExpenseCategories = mergeUniqueCategoryLists([base.expense, extraExpense]);
 
       // 2. Update user profile
       await updateDoc(doc(db, 'users', user.uid), {

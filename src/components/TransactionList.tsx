@@ -1,17 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useTransactions, Transaction } from '../hooks/useTransactions';
 import { useLocalization } from '../contexts/LocalizationContext';
+import { useMonthSelection } from '../contexts/MonthSelectionContext';
 import { db } from '../firebaseConfig';
 import { doc, deleteDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { motion, AnimatePresence } from 'motion/react';
-import { Edit2, Trash2, Search, Filter, Calendar, User, Tag, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { Edit2, Trash2, Search, Calendar, User, Tag, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
 import TransactionForm from './TransactionForm';
+import MonthPicker from './MonthPicker';
+import { isTransactionInMonthKey, parseMonthKey } from '../lib/monthUtils';
 
 const TransactionList: React.FC = () => {
   const { transactions = [], loading } = useTransactions();
   const { t, language } = useLocalization();
+  const { selectedMonthKey } = useMonthSelection();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense' | 'debt_repayment'>('all');
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
@@ -26,14 +30,24 @@ const TransactionList: React.FC = () => {
     }
   };
 
-  const filteredTransactions = transactions.filter(tx => {
-    const matchesSearch = 
+  const monthLabel = useMemo(() => {
+    const parsed = parseMonthKey(selectedMonthKey);
+    if (!parsed) return selectedMonthKey;
+    return new Date(parsed.year, parsed.monthIndex, 1).toLocaleString(
+      language === 'bn' ? 'bn-BD' : 'en-US',
+      { month: 'long', year: 'numeric' }
+    );
+  }, [selectedMonthKey, language]);
+
+  const filteredTransactions = transactions.filter((tx) => {
+    if (!isTransactionInMonthKey(tx, selectedMonthKey)) return false;
+    const matchesSearch =
       tx.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
       tx.note.toLowerCase().includes(searchTerm.toLowerCase()) ||
       tx.familyMember.toLowerCase().includes(searchTerm.toLowerCase());
-    
+
     const matchesType = filterType === 'all' || tx.type === filterType;
-    
+
     return matchesSearch && matchesType;
   });
 
@@ -47,6 +61,12 @@ const TransactionList: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <div className="space-y-2">
+        <h2 className="text-lg font-bold text-slate-800 dark:text-white">
+          {t('transactions')} · {monthLabel}
+        </h2>
+        <MonthPicker />
+      </div>
       <div className="flex flex-col md:flex-row gap-4 items-center justify-between neon-card p-4">
         <div className="relative flex-1 w-full">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />

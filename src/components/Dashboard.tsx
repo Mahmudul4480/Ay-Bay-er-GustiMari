@@ -3,7 +3,7 @@ import { useTransactions } from '../hooks/useTransactions';
 import { useLocalization } from '../contexts/LocalizationContext';
 import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency, cn } from '../lib/utils';
-import { useCurrentMonthKey } from '../hooks/useCurrentMonthKey';
+import { useMonthSelection } from '../contexts/MonthSelectionContext';
 import {
   getMonthKeyFromDate,
   getTransactionDate,
@@ -11,9 +11,27 @@ import {
   parseMonthKey,
 } from '../lib/monthUtils';
 import LiveClockDate from './LiveClockDate';
-import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, LineChart, Line, CartesianGrid, Brush } from 'recharts';
+import MonthPicker from './MonthPicker';
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  Legend,
+  LineChart,
+  Line,
+  CartesianGrid,
+  Brush,
+  Sector,
+} from 'recharts';
+import type { PieSectorDataItem } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
-import { TrendingUp, TrendingDown, Wallet, CreditCard, AlertTriangle, Trash2, PieChart as PieChartIcon, Edit2, ArrowRight, X } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, CreditCard, AlertTriangle, Trash2, PieChart as PieChartIcon, Edit2, ArrowRight, X, CalendarX } from 'lucide-react';
 import TransactionForm from './TransactionForm';
 import { Transaction } from '../hooks/useTransactions';
 import { deleteDoc, doc } from 'firebase/firestore';
@@ -24,12 +42,58 @@ interface DashboardProps {
   onTabChange?: (tab: string) => void;
 }
 
+/** Firestore may deserialize numbers as strings; always coerce before math. */
+function txAmount(tx: { amount: unknown }): number {
+  const n = Number(tx.amount);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Recharts Pie: expand hovered slice (3D lift effect). */
+function renderPieActiveShape(props: PieSectorDataItem) {
+  const cx = Number(props.cx ?? 0);
+  const cy = Number(props.cy ?? 0);
+  const innerRadius = Number(props.innerRadius ?? 0);
+  const outerRadius = Number(props.outerRadius ?? 0) + 12;
+  const startAngle = Number(props.startAngle ?? 0);
+  const endAngle = Number(props.endAngle ?? 0);
+  const fill = typeof props.fill === 'string' ? props.fill : '#3b82f6';
+  return (
+    <g>
+      <Sector
+        cx={cx}
+        cy={cy}
+        innerRadius={innerRadius}
+        outerRadius={outerRadius}
+        startAngle={startAngle}
+        endAngle={endAngle}
+        fill={fill}
+        style={{
+          filter: 'drop-shadow(0 10px 18px rgba(0,0,0,0.22))',
+          transition: 'transform 0.2s ease',
+        }}
+      />
+    </g>
+  );
+}
+
 const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
   const { transactions = [], debts = [] } = useTransactions();
   const { t, language } = useLocalization();
   const { userProfile } = useAuth();
-  const monthKey = useCurrentMonthKey();
+  const { selectedMonthKey: monthKey, currentMonthKey } = useMonthSelection();
+  const isViewingCurrentCalendarMonth = monthKey === currentMonthKey;
+  const isHistoryMode = !isViewingCurrentCalendarMonth;
   const chartUid = React.useId().replace(/:/g, '');
+
+  const cardShell = React.useCallback(
+    (...extra: (string | boolean | undefined)[]) =>
+      cn(
+        'neon-card dashboard-card-3d',
+        isHistoryMode && 'dashboard-history-card dashboard-history-card-pulse',
+        ...extra
+      ),
+    [isHistoryMode]
+  );
 
   const chartTooltipStyle = React.useCallback((): React.CSSProperties => {
     const dark = document.documentElement.classList.contains('dark');
@@ -60,25 +124,41 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
     return [...list].sort((a, b) => getTime(b) - getTime(a));
   }, [monthTransactions]);
 
+  // Earned income only — debt-linked transactions (Debt Taken, etc.) excluded
   const totalIncome = monthTransactions
-    .filter((t) => t.type === 'income')
-    .reduce((acc, curr) => acc + curr.amount, 0);
+    .filter((t) => t.type === 'income' && !t.debtId)
+    .reduce((acc, curr) => acc + txAmount(curr), 0);
 
+  // Actual spending only — debt-linked transactions (Debt Given, Debit Reversal, etc.) excluded
   const totalExpense = monthTransactions
-    .filter((t) => t.type === 'expense')
-    .reduce((acc, curr) => acc + curr.amount, 0);
+    .filter((t) => t.type === 'expense' && !t.debtId)
+    .reduce((acc, curr) => acc + txAmount(curr), 0);
+
+  // Debt in-flows: borrowed money + collected-back lending (both increase cash)
+  const debtInflows = monthTransactions
+    .filter((t) => (t.type === 'income' && !!t.debtId) || t.type === 'debt_repayment')
+    .reduce((acc, t) => acc + txAmount(t), 0);
+
+  // Debt out-flows: money lent out + borrowed money repaid (both decrease cash)
+  const debtOutflows = monthTransactions
+    .filter((t) => t.type === 'expense' && !!t.debtId)
+    .reduce((acc, t) => acc + txAmount(t), 0);
 
   const totalLent = debts
-    .filter(d => d.type === 'lent' && d.status === 'unpaid')
-    .reduce((acc, curr) => acc + curr.amount, 0);
+    .filter((d) => d.type === 'lent' && d.status === 'unpaid')
+    .reduce((acc, curr) => acc + txAmount(curr), 0);
 
   const totalBorrowed = debts
-    .filter(d => d.type === 'borrowed' && d.status === 'unpaid')
-    .reduce((acc, curr) => acc + curr.amount, 0);
+    .filter((d) => d.type === 'borrowed' && d.status === 'unpaid')
+    .reduce((acc, curr) => acc + txAmount(curr), 0);
 
-  // Simple Formula: Total Balance = Total Income - Total Expense
-  // (Since debt transactions already adjust income/expense)
-  const balance = totalIncome - totalExpense;
+  // True cash balance: all income/debt_repayment add, all expense subtracts
+  const balance = monthTransactions.reduce((acc, tx) => {
+    const amt = txAmount(tx);
+    if (tx.type === 'income' || tx.type === 'debt_repayment') return acc + amt;
+    if (tx.type === 'expense') return acc - amt;
+    return acc;
+  }, 0);
   const netDebt = totalBorrowed - totalLent;
 
   const deleteTransaction = async (id: string) => {
@@ -91,7 +171,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
   };
 
   const budgetLimit = userProfile?.budgetLimit || 0;
-  const isOverBudget = budgetLimit > 0 && totalExpense >= budgetLimit * 0.8;
+  const isOverBudget =
+    isViewingCurrentCalendarMonth && budgetLimit > 0 && totalExpense >= budgetLimit * 0.8;
 
   const stats = [
     { id: 'balance', label: t('totalBalance'), value: balance, icon: Wallet, color: 'text-blue-600', bg: 'bg-blue-50' },
@@ -112,9 +193,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
     .reduce((acc: any[], curr) => {
       const existing = acc.find(a => a.name === curr.category);
       if (existing) {
-        existing.value += curr.amount;
+        existing.value += txAmount(curr);
       } else {
-        acc.push({ name: curr.category, value: curr.amount });
+        acc.push({ name: curr.category, value: txAmount(curr) });
       }
       return acc;
     }, []);
@@ -124,9 +205,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
     .reduce((acc: any[], curr) => {
       const existing = acc.find(a => a.name === curr.familyMember);
       if (existing) {
-        existing.value += curr.amount;
+        existing.value += txAmount(curr);
       } else {
-        acc.push({ name: curr.familyMember, value: curr.amount });
+        acc.push({ name: curr.familyMember, value: txAmount(curr) });
       }
       return acc;
     }, []);
@@ -136,9 +217,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
     .reduce((acc: any[], curr) => {
       const existing = acc.find(a => a.name === curr.familyMember);
       if (existing) {
-        existing.value += curr.amount;
+        existing.value += txAmount(curr);
       } else {
-        acc.push({ name: curr.familyMember, value: curr.amount });
+        acc.push({ name: curr.familyMember, value: txAmount(curr) });
       }
       return acc;
     }, []);
@@ -166,8 +247,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
       const day = date.getDate();
       const row = daily[day - 1];
       if (!row) return;
-      if (curr.type === 'income') row.income += curr.amount;
-      else if (curr.type === 'expense') row.expense += curr.amount;
+      if (curr.type === 'income') row.income += txAmount(curr);
+      else if (curr.type === 'expense') row.expense += txAmount(curr);
     });
 
     return daily;
@@ -183,8 +264,37 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
   }, [monthKey, language]);
 
   return (
-    <div className="w-full min-w-0 space-y-6 sm:space-y-8">
-      <div className="space-y-2">
+    <div
+      className={cn(
+        'w-full min-w-0 space-y-6 sm:space-y-8',
+        isHistoryMode && 'dashboard-history-root dashboard-history-pulse-wrap rounded-3xl'
+      )}
+    >
+      {/* Month & year — drives all summary metrics and charts below */}
+      <section
+        className={cardShell(
+          'p-4 sm:p-5'
+        )}
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              {t('monthYearPicker')}
+            </h2>
+            <p className="mt-1 max-w-xl text-xs text-slate-500 dark:text-slate-400">
+              {t('monthYearPickerHint')}
+            </p>
+            {isHistoryMode && (
+              <span className="mt-2 inline-flex w-fit items-center rounded-full border border-violet-400/45 bg-violet-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-violet-700 shadow-[0_0_20px_rgba(139,92,246,0.25)] dark:border-violet-400/35 dark:bg-violet-500/15 dark:text-violet-200">
+                {t('pastDataBadge')}
+              </span>
+            )}
+          </div>
+          <MonthPicker variant="prominent" className="w-full sm:max-w-2xl lg:shrink-0" />
+        </div>
+      </section>
+
+      <div className="flex flex-col gap-2">
         <LiveClockDate prominent className="shadow-md" />
         <p className="text-center text-xs font-medium text-slate-500 dark:text-slate-400 sm:text-left">
           {t('dashboard')} · {monthLabel}
@@ -214,8 +324,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
               else if (stat.id === 'netDebt' && onTabChange) onTabChange('debts');
             }}
             className={cn(
-              "neon-card dashboard-card-3d p-4 sm:p-6 flex min-w-0 items-center gap-3 sm:gap-4 transition-all",
-              (stat.id === 'balance' || stat.id === 'income' || stat.id === 'expense' || stat.id === 'netDebt') && "cursor-pointer active:scale-[0.98]"
+              cardShell(
+                'p-4 sm:p-6 flex min-w-0 items-center gap-3 sm:gap-4 transition-all'
+              ),
+              (stat.id === 'balance' || stat.id === 'income' || stat.id === 'expense' || stat.id === 'netDebt') &&
+                'cursor-pointer active:scale-[0.98]'
             )}
           >
             <div className={cn("shrink-0 p-3 sm:p-4 rounded-2xl", stat.bg, stat.bg.includes('blue') && 'dark:bg-blue-900/20', stat.bg.includes('green') && 'dark:bg-green-900/20', stat.bg.includes('red') && 'dark:bg-red-900/20', stat.bg.includes('orange') && 'dark:bg-orange-900/20', stat.bg.includes('slate') && 'dark:bg-slate-700')}>
@@ -229,17 +342,42 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         ))}
       </div>
 
+      <p className="text-center text-xs text-slate-500 dark:text-slate-400 sm:text-left">
+        {t('debtTotalsCumulative')}
+      </p>
+
+      {/* ── No-data empty state ── */}
+      {monthTransactions.length === 0 ? (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={cardShell('flex flex-col items-center gap-4 p-10 text-center')}
+        >
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-700">
+            <CalendarX className="h-8 w-8 text-slate-400 dark:text-slate-500" />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-slate-700 dark:text-slate-200">
+              No data for {monthLabel}
+            </h3>
+            <p className="mt-1 text-sm text-slate-400 dark:text-slate-500">
+              No transactions were recorded for this period.
+            </p>
+          </div>
+        </motion.div>
+      ) : (
+        <>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-8">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="neon-card dashboard-card-3d min-w-0 p-4 sm:p-8 lg:col-span-2"
+          className={cardShell('min-w-0 p-4 sm:p-8 lg:col-span-2')}
         >
           <h3 className="text-lg font-bold text-slate-800 dark:text-white sm:text-xl mb-2 sm:mb-6">
             Income &amp; Expense Trends
           </h3>
           <p className="mb-4 text-xs text-slate-500 dark:text-slate-400 sm:mb-6 sm:text-sm">
-            Daily totals for {monthLabel} (current month)
+            {t('trendChartSubtitle')} · {monthLabel}
           </p>
           <div className="h-[min(20rem,70vw)] min-h-[220px] w-full min-w-0 sm:h-80">
             <ResponsiveContainer width="100%" height="100%">
@@ -310,7 +448,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="neon-card dashboard-card-3d min-w-0 p-4 sm:p-8"
+          className={cardShell('min-w-0 p-4 sm:p-8')}
         >
           <h3 className="text-lg font-bold text-slate-800 dark:text-white sm:text-xl mb-4 sm:mb-6">
             {t('monthlyExpense')} {t('category')}
@@ -335,6 +473,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                   outerRadius="70%"
                   paddingAngle={categoryData.length ? 5 : 0}
                   dataKey="value"
+                  activeShape={renderPieActiveShape}
                 >
                   {(categoryData.length ? categoryData : [{ name: '—', value: 1 }]).map((_, index) => (
                     <Cell
@@ -359,7 +498,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="neon-card dashboard-card-3d min-w-0 p-4 sm:p-8"
+          className={cardShell('min-w-0 p-4 sm:p-8')}
         >
           <h3 className="text-lg font-bold text-slate-800 dark:text-white sm:text-xl mb-4 sm:mb-6">{t('expenseByMember')}</h3>
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">{monthLabel}</p>
@@ -382,6 +521,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                   outerRadius="70%"
                   paddingAngle={memberExpenseData.length ? 5 : 0}
                   dataKey="value"
+                  activeShape={renderPieActiveShape}
                 >
                   {(memberExpenseData.length ? memberExpenseData : [{ name: '—', value: 1 }]).map((_, index) => (
                     <Cell
@@ -408,7 +548,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="neon-card dashboard-card-3d min-w-0 p-4 sm:p-8"
+          className={cardShell('min-w-0 p-4 sm:p-8')}
         >
           <h3 className="text-lg font-bold text-slate-800 dark:text-white sm:text-xl mb-4 sm:mb-6">
             {t('income')} vs {t('expense')}
@@ -429,12 +569,34 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                 </defs>
                 <XAxis dataKey="name" hide />
                 <YAxis tick={{ fill: '#94a3b8' }} />
-                <Tooltip 
-                  contentStyle={chartTooltipStyle()} 
+                <Tooltip
+                  cursor={false}
+                  wrapperStyle={{ outline: 'none' }}
+                  contentStyle={chartTooltipStyle()}
                 />
                 <Legend />
-                <Bar dataKey="income" fill={`url(#barInc-${chartUid})`} radius={[8, 8, 0, 0]} name={t('income')} />
-                <Bar dataKey="expense" fill={`url(#barExp-${chartUid})`} radius={[8, 8, 0, 0]} name={t('expense')} />
+                <Bar
+                  dataKey="income"
+                  fill={`url(#barInc-${chartUid})`}
+                  radius={[14, 14, 14, 14]}
+                  maxBarSize={72}
+                  name={t('income')}
+                  activeBar={{
+                    fill: `url(#barInc-${chartUid})`,
+                    radius: 16,
+                  }}
+                />
+                <Bar
+                  dataKey="expense"
+                  fill={`url(#barExp-${chartUid})`}
+                  radius={[14, 14, 14, 14]}
+                  maxBarSize={72}
+                  name={t('expense')}
+                  activeBar={{
+                    fill: `url(#barExp-${chartUid})`,
+                    radius: 16,
+                  }}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -443,7 +605,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="neon-card dashboard-card-3d min-w-0 p-4 sm:p-8"
+          className={cardShell('min-w-0 p-4 sm:p-8')}
         >
           <h3 className="text-lg font-bold text-slate-800 dark:text-white sm:text-xl mb-4 sm:mb-6">{t('incomeByMember')}</h3>
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">{monthLabel}</p>
@@ -466,6 +628,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                   outerRadius="70%"
                   paddingAngle={memberIncomeData.length ? 5 : 0}
                   dataKey="value"
+                  activeShape={renderPieActiveShape}
                 >
                   {(memberIncomeData.length ? memberIncomeData : [{ name: '—', value: 1 }]).map((_, index) => (
                     <Cell
@@ -488,7 +651,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         </motion.div>
       </div>
 
-      <div className="neon-card dashboard-card-3d p-4 sm:p-8">
+      <div className={cardShell('p-4 sm:p-8')}>
         <div className="mb-4 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-lg font-bold text-slate-800 dark:text-white sm:text-xl">
@@ -544,7 +707,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                     )}
                   >
                     {tx.type === 'expense' ? '-' : '+'}
-                    {formatCurrency(tx.amount, language)}
+                    {formatCurrency(txAmount(tx), language)}
                   </td>
                   <td className="py-4 text-right">
                     <div className="flex items-center justify-end gap-1">
@@ -604,7 +767,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                   )}
                 >
                   {tx.type === 'expense' ? '-' : '+'}
-                  {formatCurrency(tx.amount, language)}
+                  {formatCurrency(txAmount(tx), language)}
                 </p>
               </div>
               <div className="mt-3 flex justify-end gap-1">
@@ -630,6 +793,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
           )}
         </div>
       </div>
+        </>
+      )}
 
       {/* Balance Breakdown Modal */}
       <AnimatePresence>
@@ -648,22 +813,22 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                 </button>
               </div>
               <div className="p-8 space-y-6">
-                <div className="space-y-4">
+                <div className="space-y-3">
                   <div className="flex justify-between items-center p-4 bg-green-50 dark:bg-green-900/20 rounded-2xl">
-                    <span className="text-slate-600 dark:text-slate-400 font-medium">{t('monthlyIncome')} (+)</span>
+                    <span className="text-slate-600 dark:text-slate-400 font-medium">Earned Income (+)</span>
                     <span className="text-green-600 dark:text-green-400 font-bold">{formatCurrency(totalIncome, language)}</span>
                   </div>
+                  <div className="flex justify-between items-center p-4 bg-teal-50 dark:bg-teal-900/20 rounded-2xl">
+                    <span className="text-slate-600 dark:text-slate-400 font-medium">Debt In-flows (+)</span>
+                    <span className="text-teal-600 dark:text-teal-400 font-bold">{formatCurrency(debtInflows, language)}</span>
+                  </div>
                   <div className="flex justify-between items-center p-4 bg-red-50 dark:bg-red-900/20 rounded-2xl">
-                    <span className="text-slate-600 dark:text-slate-400 font-medium">{t('monthlyExpense')} (-)</span>
+                    <span className="text-slate-600 dark:text-slate-400 font-medium">Spent Expense (−)</span>
                     <span className="text-red-600 dark:text-red-400 font-bold">{formatCurrency(totalExpense, language)}</span>
                   </div>
                   <div className="flex justify-between items-center p-4 bg-orange-50 dark:bg-orange-900/20 rounded-2xl">
-                    <span className="text-slate-600 dark:text-slate-400 font-medium">{t('lent')} / Paona (-)</span>
-                    <span className="text-orange-600 dark:text-orange-400 font-bold">{formatCurrency(totalLent, language)}</span>
-                  </div>
-                  <div className="flex justify-between items-center p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl">
-                    <span className="text-slate-600 dark:text-slate-400 font-medium">{t('borrowed')} / Dena (+)</span>
-                    <span className="text-blue-600 dark:text-blue-400 font-bold">{formatCurrency(totalBorrowed, language)}</span>
+                    <span className="text-slate-600 dark:text-slate-400 font-medium">Debt Out-flows (−)</span>
+                    <span className="text-orange-600 dark:text-orange-400 font-bold">{formatCurrency(debtOutflows, language)}</span>
                   </div>
                 </div>
 
@@ -673,7 +838,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                     <span className="text-2xl font-black text-blue-600 dark:text-blue-400">{formatCurrency(balance, language)}</span>
                   </div>
                   <p className="text-xs text-slate-400 mt-2 italic">
-                    Formula: (Income - Expense) - Lent + Borrowed
+                    Balance = (Earned Income + Debt In-flows) − (Expenses + Debt Out-flows)
                   </p>
                 </div>
 

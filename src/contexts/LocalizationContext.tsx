@@ -82,6 +82,56 @@ export const translations: Translations = {
   pdfStatementTitle: { en: 'Monthly Financial Statement', bn: 'মাসিক আর্থিক বিবৃতি' },
   noteAndMember: { en: 'Note / Member', bn: 'নোট / সদস্য' },
   noFixedInSection: { en: 'No entries yet.', bn: 'এখনও কোনো নেই।' },
+  language: { en: 'Language', bn: 'ভাষা' },
+  error: { en: 'Error', bn: 'ত্রুটি' },
+  info: { en: 'Info', bn: 'তথ্য' },
+  success: { en: 'Success', bn: 'সফল' },
+  confirm: { en: 'Confirm', bn: 'নিশ্চিত করুন' },
+  remove: { en: 'Remove', bn: 'সরান' },
+  removeMember: { en: 'Remove family member', bn: 'পরিবারের সদস্য সরান' },
+  memberExists: { en: 'This member is already in the list.', bn: 'এই সদস্য ইতিমধ্যে তালিকায় আছে।' },
+  previousMonth: { en: 'Previous month', bn: 'আগের মাস' },
+  nextMonth: { en: 'Next month', bn: 'পরের মাস' },
+  selectMonth: { en: 'Select month', bn: 'মাস নির্বাচন করুন' },
+  goToCurrentMonth: { en: 'This month', bn: 'এই মাস' },
+  trendChartSubtitle: {
+    en: 'Daily income and expense totals for the selected month.',
+    bn: 'নির্বাচিত মাসের দৈনিক আয় ও ব্যয়।',
+  },
+  debtTotalsCumulative: {
+    en: 'Net debt shows all unpaid debts (not limited to the month above).',
+    bn: 'মোট দেনা সব অপরিশোধিত ঋণ দেখায় (উপরের মাসের সীমায় নয়)।',
+  },
+  pastDataBadge: {
+    en: 'Past data',
+    bn: 'অতীতের ডেটা',
+  },
+  monthYearPicker: {
+    en: 'Month & year',
+    bn: 'মাস ও বছর',
+  },
+  monthYearPickerHint: {
+    en: 'All summary cards and charts below use this month only.',
+    bn: 'নিচের সব সারাংশ ও চার্ট শুধু এই মাসের ডেটা দেখায়।',
+  },
+  resetCurrentMonth: { en: 'Reset current month', bn: 'বর্তমান মাস রিসেট' },
+  resetCurrentMonthHint: {
+    en: 'Removes every income and expense line in the current calendar month. Fixed finance templates, debt records, and transactions in other months are not changed.',
+    bn: 'বর্তমান ক্যালেন্ডার মাসের সব আয় ও ব্যয় লাইন সরায়। স্থায়ী অর্থ, দেনার রেকর্ড ও অন্যান্য মাসের লেনদেন অপরিবর্তিত থাকে।',
+  },
+  resetCurrentMonthTitle: { en: 'Reset this calendar month?', bn: 'এই ক্যালেন্ডার মাস রিসেট করবেন?' },
+  resetCurrentMonthMessage: {
+    en: 'This will permanently delete all income and expense transactions in {month} for your account. Fixed finance templates, debts, and other months are not affected. Automatic fixed-finance entries for this month will not be re-created until next month.',
+    bn: '{month} এর জন্য আপনার অ্যাকাউন্টের সব আয় ও ব্যয় লেনদেন স্থায়ীভাবে মুছে ফেলা হবে। স্থায়ী অর্থ টেমপ্লেট, দেনা ও অন্যান্য মাস প্রভাবিত হবে না।',
+  },
+  resetCurrentMonthNothing: {
+    en: 'No income or expense transactions to remove for this month.',
+    bn: 'এই মাসে মুছে ফেলার জন্য কোনো আয় বা ব্যয় লেনদেন নেই।',
+  },
+  resetCurrentMonthDone: {
+    en: 'Current month transactions were deleted.',
+    bn: 'বর্তমান মাসের লেনদেন মুছে ফেলা হয়েছে।',
+  },
 };
 
 interface LocalizationContextType {
