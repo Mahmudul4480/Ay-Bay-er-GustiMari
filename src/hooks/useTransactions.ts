@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebaseConfig';
 import { collection, query, where, onSnapshot, Timestamp } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
+import { getCurrentMonthKey } from '../lib/monthUtils';
+import { applyMonthlyFixedFinanceRollover } from '../services/monthlyFixedFinanceRollover';
 
 export interface Transaction {
   id: string;
@@ -16,6 +18,10 @@ export interface Transaction {
   debtId?: string;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
+  /** Set when created by monthly fixed-finance rollover */
+  source?: 'fixed_finance_rollover';
+  sourceFixedFinanceId?: string;
+  rolloverMonthKey?: string;
 }
 
 export interface Debt {
@@ -41,11 +47,18 @@ export interface FixedFinance {
 }
 
 export const useTransactions = () => {
-  const { user } = useAuth();
+  const { user, userProfile } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [debts, setDebts] = useState<Debt[]>([]);
   const [fixedFinances, setFixedFinances] = useState<FixedFinance[]>([]);
   const [loading, setLoading] = useState(true);
+  const rolloverInFlight = useRef(false);
+  const rolloverRanMonth = useRef<string | null>(null);
+
+  useEffect(() => {
+    rolloverRanMonth.current = null;
+    rolloverInFlight.current = false;
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!user) return;
@@ -157,6 +170,36 @@ export const useTransactions = () => {
       unsubscribeFixed();
     };
   }, [user]);
+
+  useEffect(() => {
+    if (!user || !userProfile || userProfile.onboardingCompleted === false) return;
+    if (loading) return;
+
+    const monthKey = getCurrentMonthKey();
+    if (userProfile.fixedFinanceRolloverMonth === monthKey) {
+      rolloverRanMonth.current = monthKey;
+      return;
+    }
+    if (rolloverInFlight.current || rolloverRanMonth.current === monthKey) return;
+
+    rolloverInFlight.current = true;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        await applyMonthlyFixedFinanceRollover(user.uid, fixedFinances, monthKey);
+        if (!cancelled) rolloverRanMonth.current = monthKey;
+      } catch (e) {
+        handleFirestoreError(e, OperationType.CREATE, 'monthlyFixedFinanceRollover');
+      } finally {
+        rolloverInFlight.current = false;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, userProfile, fixedFinances, loading]);
 
   return { transactions, debts, fixedFinances, loading };
 };

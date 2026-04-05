@@ -28,6 +28,16 @@ const AppContent: React.FC = () => {
     return false;
   });
   const [loginError, setLoginError] = React.useState<string | null>(null);
+  const [isMdUp, setIsMdUp] = React.useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(min-width: 768px)').matches : false
+  );
+
+  React.useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)');
+    const onChange = () => setIsMdUp(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   React.useEffect(() => {
     if (isDarkMode) {
@@ -241,7 +251,7 @@ const AppContent: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col md:flex-row transition-colors">
+    <div className="flex min-h-screen min-w-0 flex-col bg-slate-50 transition-colors dark:bg-slate-900 md:flex-row">
       {/* Mobile Header */}
       <header className="md:hidden bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-4 flex items-center justify-between sticky top-0 z-40 transition-colors">
         <div className="logo-container">
@@ -284,14 +294,14 @@ const AppContent: React.FC = () => {
 
       {/* Sidebar */}
       <AnimatePresence>
-        {(isSidebarOpen || window.innerWidth >= 768) && (
+        {(isSidebarOpen || isMdUp) && (
           <motion.aside
             initial={{ x: -300 }}
             animate={{ x: 0 }}
             exit={{ x: -300 }}
             className={cn(
-              "fixed md:sticky top-0 left-0 h-screen w-64 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 z-50 flex flex-col transition-colors",
-              !isSidebarOpen && "hidden md:flex"
+              'fixed top-0 left-0 z-50 flex h-screen w-[min(16rem,85vw)] flex-col border-r border-slate-200 bg-white transition-colors dark:border-slate-700 dark:bg-slate-800 md:sticky md:flex md:w-64',
+              !isSidebarOpen && 'hidden md:flex'
             )}
           >
             <div className="p-6 flex flex-col items-center gap-4">
@@ -375,7 +385,7 @@ const AppContent: React.FC = () => {
       </AnimatePresence>
 
       {/* Main Content */}
-      <main className="flex-1 p-4 md:p-8 max-w-7xl mx-auto w-full">
+      <main className="mx-auto w-full min-w-0 max-w-7xl flex-1 overflow-x-hidden p-3 pb-24 sm:p-4 md:p-8 md:pb-8">
         {activeTab === 'dashboard' && <Dashboard onTabChange={setActiveTab} />}
         {activeTab === 'transactions' && <TransactionList />}
         {activeTab === 'debts' && <DebtTracker />}
@@ -385,12 +395,13 @@ const AppContent: React.FC = () => {
 
       {/* Floating Add Button */}
       <motion.button
-        whileHover={{ scale: 1.1 }}
-        whileTap={{ scale: 0.9 }}
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
         onClick={() => setIsAddModalOpen(true)}
-        className="fixed bottom-8 right-8 w-16 h-16 bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center z-40"
+        className="fixed bottom-4 right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg sm:bottom-8 sm:right-8 sm:h-16 sm:w-16"
+        aria-label="Add transaction"
       >
-        <Plus className="w-8 h-8" />
+        <Plus className="h-7 w-7 sm:h-8 sm:w-8" />
       </motion.button>
 
       {/* Add Transaction Modal */}

@@ -1,11 +1,14 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { db } from '../firebaseConfig';
-import { collection, onSnapshot, query, orderBy, limit, where } from 'firebase/firestore';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
+import { useCurrentMonthKey } from '../hooks/useCurrentMonthKey';
+import { isTransactionInMonthKey, parseMonthKey } from '../lib/monthUtils';
+import LiveClockDate from '../components/LiveClockDate';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, TrendingUp, TrendingDown, ArrowLeft, User as UserIcon, 
-  Download, Filter, Search, ChevronRight, X, CreditCard, 
+  Download, Search, ChevronRight, X, CreditCard, 
   Calendar, PieChart as PieChartIcon, BarChart3, Wallet,
   Star, ShieldCheck
 } from 'lucide-react';
@@ -15,10 +18,11 @@ import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
   BarChart, Bar, XAxis, YAxis, CartesianGrid
 } from 'recharts';
-import { startOfWeek, format, subWeeks, isWithinInterval } from 'date-fns';
+import { startOfWeek, format, subWeeks } from 'date-fns';
 
 const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
-  const { language, t } = useLocalization();
+  const { language } = useLocalization();
+  const adminMonthKey = useCurrentMonthKey();
   const adminChartUid = React.useId().replace(/:/g, '');
 
   const chartTooltipStyle = useCallback((): React.CSSProperties => {
@@ -34,7 +38,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       padding: '12px 16px',
     };
   }, []);
-  const [users, setUsers] = useState<any[]>([]);
+  const [rawUsers, setRawUsers] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -44,54 +48,86 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
   useEffect(() => {
     setLoading(true);
-    
-    const unsubscribeUsers = onSnapshot(collection(db, 'users'), (usersSnap) => {
-      const usersList = usersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-      
-      const unsubscribeTransactions = onSnapshot(collection(db, 'transactions'), (transactionsSnap) => {
-        const transactionsList = transactionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-        setTransactions(transactionsList);
-        
-        const enriched = usersList.map((user: any) => {
-          const userTrans = transactionsList.filter((t: any) => t.userId === user.id);
-          const income = userTrans.filter((t: any) => t.type === 'income').reduce((sum: number, t: any) => sum + (Number(t.amount) || 0), 0);
-          const expense = userTrans.filter((t: any) => t.type === 'expense').reduce((sum: number, t: any) => sum + (Number(t.amount) || 0), 0);
-          
-          const expenseCategories: Record<string, number> = {};
-          userTrans.filter((t: any) => t.type === 'expense').forEach((t: any) => {
-            expenseCategories[t.category] = (expenseCategories[t.category] || 0) + (Number(t.amount) || 0);
-          });
-          
-          const topCategory = Object.entries(expenseCategories).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A';
-          const savingsRate = income > 0 ? ((income - expense) / income) * 100 : 0;
+    let usersOk = false;
+    let transOk = false;
+    const markReady = () => {
+      if (usersOk && transOk) setLoading(false);
+    };
 
-          return {
-            ...user,
-            totalIncome: income,
-            totalExpense: expense,
-            balance: income - expense,
-            transactionCount: userTrans.length,
-            topCategory,
-            savingsRate,
-            subscription: userTrans.length > 15 ? 'Premium' : 'Free'
-          };
+    const unsubscribeUsers = onSnapshot(
+      collection(db, 'users'),
+      (usersSnap) => {
+        setRawUsers(usersSnap.docs.map((d) => ({ id: d.id, ...d.data() } as any)));
+        usersOk = true;
+        markReady();
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'users');
+        usersOk = true;
+        markReady();
+      }
+    );
+
+    const unsubscribeTransactions = onSnapshot(
+      collection(db, 'transactions'),
+      (transactionsSnap) => {
+        setTransactions(
+          transactionsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as any))
+        );
+        transOk = true;
+        markReady();
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'transactions');
+        transOk = true;
+        markReady();
+      }
+    );
+
+    return () => {
+      unsubscribeUsers();
+      unsubscribeTransactions();
+    };
+  }, []);
+
+  const transactionsThisMonth = useMemo(
+    () => transactions.filter((t) => isTransactionInMonthKey(t, adminMonthKey)),
+    [transactions, adminMonthKey]
+  );
+
+  const users = useMemo(() => {
+    return rawUsers.map((user: any) => {
+      const userTrans = transactionsThisMonth.filter((t: any) => t.userId === user.id);
+      const income = userTrans
+        .filter((t: any) => t.type === 'income')
+        .reduce((sum: number, t: any) => sum + (Number(t.amount) || 0), 0);
+      const expense = userTrans
+        .filter((t: any) => t.type === 'expense')
+        .reduce((sum: number, t: any) => sum + (Number(t.amount) || 0), 0);
+
+      const expenseCategories: Record<string, number> = {};
+      userTrans
+        .filter((t: any) => t.type === 'expense')
+        .forEach((t: any) => {
+          expenseCategories[t.category] = (expenseCategories[t.category] || 0) + (Number(t.amount) || 0);
         });
 
-        setUsers(enriched);
-        setLoading(false);
-      }, (err) => {
-        handleFirestoreError(err, OperationType.LIST, 'transactions');
-        setLoading(false);
-      });
+      const topCategory =
+        Object.entries(expenseCategories).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A';
+      const savingsRate = income > 0 ? ((income - expense) / income) * 100 : 0;
 
-      return () => unsubscribeTransactions();
-    }, (err) => {
-      handleFirestoreError(err, OperationType.LIST, 'users');
-      setLoading(false);
+      return {
+        ...user,
+        totalIncome: income,
+        totalExpense: expense,
+        balance: income - expense,
+        transactionCount: userTrans.length,
+        topCategory,
+        savingsRate,
+        subscription: userTrans.length > 15 ? 'Premium' : 'Free',
+      };
     });
-
-    return () => unsubscribeUsers();
-  }, []);
+  }, [rawUsers, transactionsThisMonth]);
 
   const filteredUsers = useMemo(() => {
     return users.filter(user => {
@@ -112,14 +148,14 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
   const spendingDistribution = useMemo(() => {
     const categories: Record<string, number> = {};
-    transactions.filter(t => t.type === 'expense').forEach(t => {
+    transactionsThisMonth.filter((t) => t.type === 'expense').forEach((t) => {
       categories[t.category] = (categories[t.category] || 0) + t.amount;
     });
     return Object.entries(categories)
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 5);
-  }, [transactions]);
+  }, [transactionsThisMonth]);
 
   const userGrowthData = useMemo(() => {
     const weeks: Record<string, number> = {};
@@ -175,14 +211,23 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
   const handleUserClick = async (user: any) => {
     setSelectedUser(user);
-    const userTrans = transactions
-      .filter(t => t.userId === user.id)
+    const userTrans = transactionsThisMonth
+      .filter((t) => t.userId === user.id)
       .sort((a, b) => (b.date?.seconds || 0) - (a.date?.seconds || 0))
       .slice(0, 5);
     setUserTransactions(userTrans);
   };
 
   const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+
+  const adminMonthLabel = useMemo(() => {
+    const parsed = parseMonthKey(adminMonthKey);
+    if (!parsed) return adminMonthKey;
+    return new Date(parsed.year, parsed.monthIndex, 1).toLocaleString(
+      language === 'bn' ? 'bn-BD' : 'en-US',
+      { month: 'long', year: 'numeric' }
+    );
+  }, [adminMonthKey, language]);
 
   if (loading) {
     return (
@@ -193,42 +238,50 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   }
 
   return (
-    <div className="space-y-8 pb-20">
+    <div className="w-full min-w-0 space-y-6 pb-24 sm:space-y-8 sm:pb-20">
+      <LiveClockDate prominent className="shadow-md" />
+
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <button 
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-start gap-3 sm:gap-4">
+          <button
             onClick={onBack}
-            className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-all"
+            className="mt-1 shrink-0 rounded-full p-2 transition-all hover:bg-slate-100 dark:hover:bg-slate-700"
           >
-            <ArrowLeft className="w-6 h-6 text-slate-600 dark:text-slate-400" />
+            <ArrowLeft className="h-6 w-6 text-slate-600 dark:text-slate-400" />
           </button>
-          <div>
-            <h2 className="text-3xl font-bold text-slate-800 dark:text-white">Marketing Insights</h2>
-            <p className="text-slate-500 dark:text-slate-400">Deep dive into user behavior and financial health</p>
+          <div className="min-w-0">
+            <h2 className="text-2xl font-bold text-slate-800 dark:text-white sm:text-3xl">Marketing Insights</h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Financial metrics for <span className="font-semibold text-slate-700 dark:text-slate-200">{adminMonthLabel}</span>{' '}
+              (current month)
+            </p>
           </div>
         </div>
-        <button 
+        <button
           onClick={exportToCSV}
-          className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-2xl font-bold transition-all shadow-lg shadow-blue-500/20 active:scale-95"
+          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-6 py-3 font-bold text-white shadow-lg shadow-blue-500/20 transition-all hover:bg-blue-700 active:scale-95 lg:w-auto"
         >
-          <Download className="w-5 h-5" />
+          <Download className="h-5 w-5" />
           Export for Ads
         </button>
       </div>
 
       {/* Analytics Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <motion.div 
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <motion.div
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
-          className="admin-chart-card-3d rounded-[2.5rem] border border-slate-200/90 p-6 dark:border-slate-700"
+          className="admin-chart-card-3d min-w-0 rounded-[1.75rem] border border-slate-200/90 p-4 sm:rounded-[2.5rem] sm:p-6 dark:border-slate-700"
         >
-          <div className="flex items-center gap-3 mb-6">
-            <PieChartIcon className="w-5 h-5 text-blue-500" />
-            <h3 className="font-bold text-slate-800 dark:text-white">Global Spending Distribution</h3>
+          <div className="mb-4 flex flex-col gap-1 sm:mb-6 sm:flex-row sm:items-center sm:gap-3">
+            <PieChartIcon className="h-5 w-5 shrink-0 text-blue-500" />
+            <div className="min-w-0">
+              <h3 className="font-bold text-slate-800 dark:text-white">Global Spending Distribution</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{adminMonthLabel}</p>
+            </div>
           </div>
-          <div className="h-[300px] w-full">
+          <div className="h-[min(18rem,65vw)] min-h-[220px] w-full sm:h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <defs>
@@ -240,17 +293,26 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                   ))}
                 </defs>
                 <Pie
-                  data={spendingDistribution}
+                  data={spendingDistribution.length ? spendingDistribution : [{ name: '—', value: 1 }]}
                   cx="50%"
                   cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
+                  innerRadius="45%"
+                  outerRadius="70%"
+                  paddingAngle={spendingDistribution.length ? 5 : 0}
                   dataKey="value"
                 >
-                  {spendingDistribution.map((_, index) => (
-                    <Cell key={`cell-${index}`} fill={`url(#adm-pie-${adminChartUid}-${index % COLORS.length})`} />
-                  ))}
+                  {(spendingDistribution.length ? spendingDistribution : [{ name: '—', value: 1 }]).map(
+                    (_, index) => (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={
+                          spendingDistribution.length
+                            ? `url(#adm-pie-${adminChartUid}-${index % COLORS.length})`
+                            : '#e2e8f0'
+                        }
+                      />
+                    )
+                  )}
                 </Pie>
                 <Tooltip 
                   contentStyle={chartTooltipStyle()}
@@ -262,16 +324,19 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           </div>
         </motion.div>
 
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
-          className="admin-chart-card-3d rounded-[2.5rem] border border-slate-200/90 p-6 dark:border-slate-700"
+          className="admin-chart-card-3d min-w-0 rounded-[1.75rem] border border-slate-200/90 p-4 sm:rounded-[2.5rem] sm:p-6 dark:border-slate-700"
         >
-          <div className="flex items-center gap-3 mb-6">
-            <BarChart3 className="w-5 h-5 text-purple-500" />
-            <h3 className="font-bold text-slate-800 dark:text-white">User Growth (Weekly)</h3>
+          <div className="mb-4 flex flex-col gap-1 sm:mb-6 sm:flex-row sm:items-center sm:gap-3">
+            <BarChart3 className="h-5 w-5 shrink-0 text-purple-500" />
+            <div className="min-w-0">
+              <h3 className="font-bold text-slate-800 dark:text-white">User Growth (Weekly)</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">New sign-ups by week (all time)</p>
+            </div>
           </div>
-          <div className="h-[300px] w-full">
+          <div className="h-[min(18rem,65vw)] min-h-[220px] w-full sm:h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={userGrowthData}>
                 <defs>
@@ -475,7 +540,9 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                       <Calendar className="w-4 h-4 text-blue-500" />
                       Recent Activity
                     </h4>
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Last 5 Transactions</span>
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+                      Last 5 · {adminMonthLabel}
+                    </span>
                   </div>
                   <div className="space-y-3">
                     {userTransactions.map((t) => (

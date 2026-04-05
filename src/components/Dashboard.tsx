@@ -3,6 +3,14 @@ import { useTransactions } from '../hooks/useTransactions';
 import { useLocalization } from '../contexts/LocalizationContext';
 import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency, cn } from '../lib/utils';
+import { useCurrentMonthKey } from '../hooks/useCurrentMonthKey';
+import {
+  getMonthKeyFromDate,
+  getTransactionDate,
+  isTransactionInMonthKey,
+  parseMonthKey,
+} from '../lib/monthUtils';
+import LiveClockDate from './LiveClockDate';
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, LineChart, Line, CartesianGrid, Brush } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
 import { TrendingUp, TrendingDown, Wallet, CreditCard, AlertTriangle, Trash2, PieChart as PieChartIcon, Edit2, ArrowRight, X } from 'lucide-react';
@@ -20,6 +28,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
   const { transactions = [], debts = [] } = useTransactions();
   const { t, language } = useLocalization();
   const { userProfile } = useAuth();
+  const monthKey = useCurrentMonthKey();
   const chartUid = React.useId().replace(/:/g, '');
 
   const chartTooltipStyle = React.useCallback((): React.CSSProperties => {
@@ -40,12 +49,23 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
   const [deleteConfirmId, setDeleteConfirmId] = React.useState<string | null>(null);
   const [showBalanceBreakdown, setShowBalanceBreakdown] = React.useState(false);
 
-  const totalIncome = transactions
-    .filter(t => t.type === 'income')
+  const monthTransactions = React.useMemo(
+    () => transactions.filter((tx) => isTransactionInMonthKey(tx, monthKey)),
+    [transactions, monthKey]
+  );
+
+  const recentMonthTransactions = React.useMemo(() => {
+    const list = monthTransactions.filter((tx) => tx.type === 'income' || tx.type === 'expense');
+    const getTime = (tx: Transaction) => getTransactionDate(tx)?.getTime() ?? 0;
+    return [...list].sort((a, b) => getTime(b) - getTime(a));
+  }, [monthTransactions]);
+
+  const totalIncome = monthTransactions
+    .filter((t) => t.type === 'income')
     .reduce((acc, curr) => acc + curr.amount, 0);
 
-  const totalExpense = transactions
-    .filter(t => t.type === 'expense')
+  const totalExpense = monthTransactions
+    .filter((t) => t.type === 'expense')
     .reduce((acc, curr) => acc + curr.amount, 0);
 
   const totalLent = debts
@@ -87,8 +107,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
     },
   ];
 
-  const categoryData = transactions
-    .filter(t => t.type === 'expense')
+  const categoryData = monthTransactions
+    .filter((t) => t.type === 'expense')
     .reduce((acc: any[], curr) => {
       const existing = acc.find(a => a.name === curr.category);
       if (existing) {
@@ -99,8 +119,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
       return acc;
     }, []);
 
-  const memberExpenseData = transactions
-    .filter(t => t.type === 'expense')
+  const memberExpenseData = monthTransactions
+    .filter((t) => t.type === 'expense')
     .reduce((acc: any[], curr) => {
       const existing = acc.find(a => a.name === curr.familyMember);
       if (existing) {
@@ -111,8 +131,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
       return acc;
     }, []);
 
-  const memberIncomeData = transactions
-    .filter(t => t.type === 'income')
+  const memberIncomeData = monthTransactions
+    .filter((t) => t.type === 'income')
     .reduce((acc: any[], curr) => {
       const existing = acc.find(a => a.name === curr.familyMember);
       if (existing) {
@@ -125,26 +145,51 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
 
   const COLORS = ['#3b82f6', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6', '#ec4899'];
 
-  const trendData = transactions.reduce((acc: any[], curr) => {
-    const date = curr.date && typeof curr.date.toDate === 'function' ? curr.date.toDate() : new Date();
-    const month = date.toLocaleString('default', { month: 'short', year: '2-digit' });
-    const existing = acc.find(a => a.name === month);
-    if (existing) {
-      if (curr.type === 'income') existing.income += curr.amount;
-      else if (curr.type === 'expense') existing.expense += curr.amount;
-    } else {
-      acc.push({ 
-        name: month, 
-        income: curr.type === 'income' ? curr.amount : 0, 
-        expense: curr.type === 'expense' ? curr.amount : 0,
-        timestamp: date.getTime() 
-      });
-    }
-    return acc;
-  }, []).sort((a, b) => a.timestamp - b.timestamp);
+  const trendData = React.useMemo(() => {
+    const parsed = parseMonthKey(monthKey);
+    if (!parsed) return [];
+    const { year, monthIndex } = parsed;
+    const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+    const daily: { name: string; income: number; expense: number; day: number }[] = Array.from(
+      { length: daysInMonth },
+      (_, i) => ({
+        name: String(i + 1),
+        income: 0,
+        expense: 0,
+        day: i + 1,
+      })
+    );
+
+    monthTransactions.forEach((curr) => {
+      const date = getTransactionDate(curr);
+      if (!date || getMonthKeyFromDate(date) !== monthKey) return;
+      const day = date.getDate();
+      const row = daily[day - 1];
+      if (!row) return;
+      if (curr.type === 'income') row.income += curr.amount;
+      else if (curr.type === 'expense') row.expense += curr.amount;
+    });
+
+    return daily;
+  }, [monthTransactions, monthKey]);
+
+  const monthLabel = React.useMemo(() => {
+    const parsed = parseMonthKey(monthKey);
+    if (!parsed) return monthKey;
+    return new Date(parsed.year, parsed.monthIndex, 1).toLocaleString(
+      language === 'bn' ? 'bn-BD' : 'en-US',
+      { month: 'long', year: 'numeric' }
+    );
+  }, [monthKey, language]);
 
   return (
-    <div className="space-y-8">
+    <div className="w-full min-w-0 space-y-6 sm:space-y-8">
+      <div className="space-y-2">
+        <LiveClockDate prominent className="shadow-md" />
+        <p className="text-center text-xs font-medium text-slate-500 dark:text-slate-400 sm:text-left">
+          {t('dashboard')} · {monthLabel}
+        </p>
+      </div>
       {isOverBudget && (
         <motion.div
           initial={{ opacity: 0, y: -20 }}
@@ -155,7 +200,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
           <p className="font-semibold">{t('warningLimit')}</p>
         </motion.div>
       )}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 min-w-0 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {stats.map((stat, i) => (
           <motion.div
             key={i}
@@ -169,29 +214,34 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
               else if (stat.id === 'netDebt' && onTabChange) onTabChange('debts');
             }}
             className={cn(
-              "neon-card dashboard-card-3d p-6 flex items-center gap-4 transition-all",
+              "neon-card dashboard-card-3d p-4 sm:p-6 flex min-w-0 items-center gap-3 sm:gap-4 transition-all",
               (stat.id === 'balance' || stat.id === 'income' || stat.id === 'expense' || stat.id === 'netDebt') && "cursor-pointer active:scale-[0.98]"
             )}
           >
-            <div className={cn("p-4 rounded-2xl", stat.bg, stat.bg.includes('blue') && 'dark:bg-blue-900/20', stat.bg.includes('green') && 'dark:bg-green-900/20', stat.bg.includes('red') && 'dark:bg-red-900/20', stat.bg.includes('orange') && 'dark:bg-orange-900/20', stat.bg.includes('slate') && 'dark:bg-slate-700')}>
+            <div className={cn("shrink-0 p-3 sm:p-4 rounded-2xl", stat.bg, stat.bg.includes('blue') && 'dark:bg-blue-900/20', stat.bg.includes('green') && 'dark:bg-green-900/20', stat.bg.includes('red') && 'dark:bg-red-900/20', stat.bg.includes('orange') && 'dark:bg-orange-900/20', stat.bg.includes('slate') && 'dark:bg-slate-700')}>
               <stat.icon className={cn("w-6 h-6", stat.color, stat.color.includes('blue') && 'dark:text-blue-400', stat.color.includes('green') && 'dark:text-green-400', stat.color.includes('red') && 'dark:text-red-400', stat.color.includes('orange') && 'dark:text-orange-400', stat.color.includes('slate') && 'dark:text-slate-400')} />
             </div>
-            <div>
-              <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">{stat.label}</p>
-              <p className={cn("text-2xl font-bold", stat.color, stat.color.includes('blue') && 'dark:text-blue-400', stat.color.includes('green') && 'dark:text-green-400', stat.color.includes('red') && 'dark:text-red-400', stat.color.includes('orange') && 'dark:text-orange-400', stat.color.includes('slate') && 'dark:text-slate-400')}>{formatCurrency(stat.value, language)}</p>
+            <div className="min-w-0">
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium">{stat.label}</p>
+              <p className={cn("truncate text-xl font-bold sm:text-2xl", stat.color, stat.color.includes('blue') && 'dark:text-blue-400', stat.color.includes('green') && 'dark:text-green-400', stat.color.includes('red') && 'dark:text-red-400', stat.color.includes('orange') && 'dark:text-orange-400', stat.color.includes('slate') && 'dark:text-slate-400')}>{formatCurrency(stat.value, language)}</p>
             </div>
           </motion.div>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-8">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="neon-card dashboard-card-3d p-8 lg:col-span-2"
+          className="neon-card dashboard-card-3d min-w-0 p-4 sm:p-8 lg:col-span-2"
         >
-          <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-6">Income & Expense Trends</h3>
-          <div className="h-80">
+          <h3 className="text-lg font-bold text-slate-800 dark:text-white sm:text-xl mb-2 sm:mb-6">
+            Income &amp; Expense Trends
+          </h3>
+          <p className="mb-4 text-xs text-slate-500 dark:text-slate-400 sm:mb-6 sm:text-sm">
+            Daily totals for {monthLabel} (current month)
+          </p>
+          <div className="h-[min(20rem,70vw)] min-h-[220px] w-full min-w-0 sm:h-80">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={trendData}>
                 <defs>
@@ -205,11 +255,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                <XAxis 
-                  dataKey="name" 
-                  tick={{ fill: '#94a3b8' }} 
+                <XAxis
+                  dataKey="name"
+                  tick={{ fill: '#94a3b8', fontSize: 11 }}
                   axisLine={false}
                   tickLine={false}
+                  interval="preserveStartEnd"
+                  label={{ value: 'Day of month', position: 'insideBottom', offset: -4, fill: '#94a3b8', fontSize: 11 }}
                 />
                 <YAxis 
                   tick={{ fill: '#94a3b8' }} 
@@ -254,14 +306,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         </motion.div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-8">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="neon-card dashboard-card-3d p-8"
+          className="neon-card dashboard-card-3d min-w-0 p-4 sm:p-8"
         >
-          <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-6">{t('monthlyExpense')} {t('category')}</h3>
-          <div className="h-64">
+          <h3 className="text-lg font-bold text-slate-800 dark:text-white sm:text-xl mb-4 sm:mb-6">
+            {t('monthlyExpense')} {t('category')}
+          </h3>
+          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">{monthLabel}</p>
+          <div className="h-[min(16rem,55vw)] min-h-[200px] w-full min-w-0 sm:h-64">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <defs>
@@ -273,16 +328,23 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                   ))}
                 </defs>
                 <Pie
-                  data={categoryData}
+                  data={categoryData.length ? categoryData : [{ name: '—', value: 1 }]}
                   cx="50%"
                   cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
+                  innerRadius="45%"
+                  outerRadius="70%"
+                  paddingAngle={categoryData.length ? 5 : 0}
                   dataKey="value"
                 >
-                  {categoryData.map((_, index) => (
-                    <Cell key={`cell-${index}`} fill={`url(#pie-cat-${chartUid}-${index % COLORS.length})`} />
+                  {(categoryData.length ? categoryData : [{ name: '—', value: 1 }]).map((_, index) => (
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={
+                        categoryData.length
+                          ? `url(#pie-cat-${chartUid}-${index % COLORS.length})`
+                          : '#e2e8f0'
+                      }
+                    />
                   ))}
                 </Pie>
                 <Tooltip 
@@ -297,10 +359,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="neon-card dashboard-card-3d p-8"
+          className="neon-card dashboard-card-3d min-w-0 p-4 sm:p-8"
         >
-          <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-6">{t('expenseByMember')}</h3>
-          <div className="h-64">
+          <h3 className="text-lg font-bold text-slate-800 dark:text-white sm:text-xl mb-4 sm:mb-6">{t('expenseByMember')}</h3>
+          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">{monthLabel}</p>
+          <div className="h-[min(16rem,55vw)] min-h-[200px] w-full min-w-0 sm:h-64">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <defs>
@@ -312,16 +375,23 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                   ))}
                 </defs>
                 <Pie
-                  data={memberExpenseData}
+                  data={memberExpenseData.length ? memberExpenseData : [{ name: '—', value: 1 }]}
                   cx="50%"
                   cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
+                  innerRadius="45%"
+                  outerRadius="70%"
+                  paddingAngle={memberExpenseData.length ? 5 : 0}
                   dataKey="value"
                 >
-                  {memberExpenseData.map((_, index) => (
-                    <Cell key={`cell-${index}`} fill={`url(#pie-memexp-${chartUid}-${index % COLORS.length})`} />
+                  {(memberExpenseData.length ? memberExpenseData : [{ name: '—', value: 1 }]).map((_, index) => (
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={
+                        memberExpenseData.length
+                          ? `url(#pie-memexp-${chartUid}-${index % COLORS.length})`
+                          : '#e2e8f0'
+                      }
+                    />
                   ))}
                 </Pie>
                 <Tooltip 
@@ -334,14 +404,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         </motion.div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-8">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="neon-card dashboard-card-3d p-8"
+          className="neon-card dashboard-card-3d min-w-0 p-4 sm:p-8"
         >
-          <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-6">{t('income')} vs {t('expense')}</h3>
-          <div className="h-64">
+          <h3 className="text-lg font-bold text-slate-800 dark:text-white sm:text-xl mb-4 sm:mb-6">
+            {t('income')} vs {t('expense')}
+          </h3>
+          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">{monthLabel}</p>
+          <div className="h-[min(16rem,55vw)] min-h-[200px] w-full min-w-0 sm:h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={[{ name: 'Total', income: totalIncome, expense: totalExpense }]}>
                 <defs>
@@ -370,10 +443,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="neon-card dashboard-card-3d p-8"
+          className="neon-card dashboard-card-3d min-w-0 p-4 sm:p-8"
         >
-          <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-6">{t('incomeByMember')}</h3>
-          <div className="h-64">
+          <h3 className="text-lg font-bold text-slate-800 dark:text-white sm:text-xl mb-4 sm:mb-6">{t('incomeByMember')}</h3>
+          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">{monthLabel}</p>
+          <div className="h-[min(16rem,55vw)] min-h-[200px] w-full min-w-0 sm:h-64">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <defs>
@@ -385,16 +459,23 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
                   ))}
                 </defs>
                 <Pie
-                  data={memberIncomeData}
+                  data={memberIncomeData.length ? memberIncomeData : [{ name: '—', value: 1 }]}
                   cx="50%"
                   cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
+                  innerRadius="45%"
+                  outerRadius="70%"
+                  paddingAngle={memberIncomeData.length ? 5 : 0}
                   dataKey="value"
                 >
-                  {memberIncomeData.map((_, index) => (
-                    <Cell key={`cell-${index}`} fill={`url(#pie-meminc-${chartUid}-${index % COLORS.length})`} />
+                  {(memberIncomeData.length ? memberIncomeData : [{ name: '—', value: 1 }]).map((_, index) => (
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={
+                        memberIncomeData.length
+                          ? `url(#pie-meminc-${chartUid}-${index % COLORS.length})`
+                          : '#e2e8f0'
+                      }
+                    />
                   ))}
                 </Pie>
                 <Tooltip 
@@ -407,62 +488,77 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         </motion.div>
       </div>
 
-      <div className="neon-card dashboard-card-3d p-8">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-xl font-bold text-slate-800 dark:text-white">{t('dashboard')} - Recent Transactions</h3>
+      <div className="neon-card dashboard-card-3d p-4 sm:p-8">
+        <div className="mb-4 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-slate-800 dark:text-white sm:text-xl">
+              {t('dashboard')} — {t('transactions')}
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">{monthLabel}</p>
+          </div>
           {onTabChange && (
-            <button 
+            <button
               onClick={() => onTabChange('transactions')}
-              className="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-bold hover:gap-3 transition-all"
+              className="flex items-center justify-center gap-2 self-start rounded-xl bg-blue-50 px-4 py-2 text-sm font-bold text-blue-600 transition-all hover:gap-3 dark:bg-blue-950/40 dark:text-blue-400 sm:self-auto"
             >
-              View All <ArrowRight className="w-4 h-4" />
+              View All <ArrowRight className="h-4 w-4" />
             </button>
           )}
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
+
+        <div className="hidden min-w-0 overflow-x-auto md:block">
+          <table className="w-full min-w-[600px] text-left">
             <thead>
               <tr className="border-b border-slate-100 dark:border-slate-700">
                 <th className="pb-4 font-semibold text-slate-600 dark:text-slate-400">{t('date')}</th>
                 <th className="pb-4 font-semibold text-slate-600 dark:text-slate-400">{t('category')}</th>
                 <th className="pb-4 font-semibold text-slate-600 dark:text-slate-400">{t('familyMember')}</th>
-                <th className="pb-4 font-semibold text-slate-600 dark:text-slate-400 text-right">{t('amount')}</th>
-                <th className="pb-4 font-semibold text-slate-600 dark:text-slate-400 text-right">{t('action')}</th>
+                <th className="pb-4 text-right font-semibold text-slate-600 dark:text-slate-400">{t('amount')}</th>
+                <th className="pb-4 text-right font-semibold text-slate-600 dark:text-slate-400">{t('action')}</th>
               </tr>
             </thead>
             <tbody>
-              {transactions.slice(0, 5).map((tx) => (
-                <tr key={tx.id} className="border-b border-slate-50 dark:border-slate-700/50 last:border-0 group">
+              {recentMonthTransactions.slice(0, 5).map((tx) => (
+                <tr key={tx.id} className="group border-b border-slate-50 last:border-0 dark:border-slate-700/50">
                   <td className="py-4 text-slate-600 dark:text-slate-400">
                     {tx.date ? (
-                      typeof tx.date.toDate === 'function' 
-                        ? tx.date.toDate().toLocaleDateString() 
-                        : (tx.date instanceof Date ? tx.date.toLocaleDateString() : 'N/A')
-                    ) : 'N/A'}
+                      typeof tx.date.toDate === 'function'
+                        ? tx.date.toDate().toLocaleDateString()
+                        : tx.date instanceof Date
+                          ? tx.date.toLocaleDateString()
+                          : 'N/A'
+                    ) : (
+                      'N/A'
+                    )}
                   </td>
                   <td className="py-4 font-medium text-slate-800 dark:text-white">{tx.category}</td>
                   <td className="py-4 text-slate-500 dark:text-slate-400">{tx.familyMember}</td>
-                  <td className={cn(
-                    "py-4 font-bold text-right",
-                    tx.type === 'expense' ? "text-red-600 dark:text-red-400" :
-                    tx.type === 'debt_repayment' ? "text-teal-600 dark:text-teal-400" :
-                    "text-green-600 dark:text-green-400"
-                  )}>
-                    {tx.type === 'expense' ? '-' : '+'}{formatCurrency(tx.amount, language)}
+                  <td
+                    className={cn(
+                      'py-4 text-right font-bold',
+                      tx.type === 'expense'
+                        ? 'text-red-600 dark:text-red-400'
+                        : tx.type === 'debt_repayment'
+                          ? 'text-teal-600 dark:text-teal-400'
+                          : 'text-green-600 dark:text-green-400'
+                    )}
+                  >
+                    {tx.type === 'expense' ? '-' : '+'}
+                    {formatCurrency(tx.amount, language)}
                   </td>
                   <td className="py-4 text-right">
                     <div className="flex items-center justify-end gap-1">
-                      <button 
+                      <button
                         onClick={() => setEditingTransaction(tx)}
-                        className="p-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-slate-400 hover:text-blue-500 rounded-lg transition-all"
+                        className="rounded-lg p-2 text-slate-400 transition-all hover:bg-blue-50 hover:text-blue-500 dark:hover:bg-blue-900/20"
                       >
-                        <Edit2 className="w-4 h-4" />
+                        <Edit2 className="h-4 w-4" />
                       </button>
-                      <button 
+                      <button
                         onClick={() => setDeleteConfirmId(tx.id)}
-                        className="p-2 hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-500 rounded-lg transition-all"
+                        className="rounded-lg p-2 text-slate-400 transition-all hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
                   </td>
@@ -470,6 +566,68 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
               ))}
             </tbody>
           </table>
+          {recentMonthTransactions.length === 0 && (
+            <p className="py-8 text-center text-sm text-slate-500 dark:text-slate-400">
+              No transactions in {monthLabel} yet.
+            </p>
+          )}
+        </div>
+
+        <div className="space-y-3 md:hidden">
+          {recentMonthTransactions.slice(0, 5).map((tx) => (
+            <div
+              key={tx.id}
+              className="rounded-2xl border border-slate-100 bg-slate-50/50 p-4 dark:border-slate-700 dark:bg-slate-900/30"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-800 dark:text-white">{tx.category}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {tx.familyMember} ·{' '}
+                    {tx.date
+                      ? typeof tx.date.toDate === 'function'
+                        ? tx.date.toDate().toLocaleDateString()
+                        : tx.date instanceof Date
+                          ? tx.date.toLocaleDateString()
+                          : ''
+                      : ''}
+                  </p>
+                </div>
+                <p
+                  className={cn(
+                    'shrink-0 font-bold',
+                    tx.type === 'expense'
+                      ? 'text-red-600 dark:text-red-400'
+                      : tx.type === 'debt_repayment'
+                        ? 'text-teal-600 dark:text-teal-400'
+                        : 'text-green-600 dark:text-green-400'
+                  )}
+                >
+                  {tx.type === 'expense' ? '-' : '+'}
+                  {formatCurrency(tx.amount, language)}
+                </p>
+              </div>
+              <div className="mt-3 flex justify-end gap-1">
+                <button
+                  onClick={() => setEditingTransaction(tx)}
+                  className="rounded-lg p-2 text-slate-400 hover:bg-blue-50 hover:text-blue-500 dark:hover:bg-blue-900/20"
+                >
+                  <Edit2 className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setDeleteConfirmId(tx.id)}
+                  className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+          {recentMonthTransactions.length === 0 && (
+            <p className="py-6 text-center text-sm text-slate-500 dark:text-slate-400">
+              No transactions in {monthLabel} yet.
+            </p>
+          )}
         </div>
       </div>
 
