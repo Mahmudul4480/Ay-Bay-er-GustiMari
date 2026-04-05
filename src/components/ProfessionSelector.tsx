@@ -1,10 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Sparkles, Loader2, CheckCircle2, Info, PencilLine } from 'lucide-react';
+import { Sparkles, Loader2, CheckCircle2, Info, PencilLine, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebaseConfig';
 import { doc, updateDoc } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { cn } from '../lib/utils';
 import {
   PROFESSIONS,
@@ -17,6 +16,7 @@ const ProfessionSelector: React.FC = () => {
   const [selected, setSelected] = useState<ProfessionId | null>(null);
   const [customProfession, setCustomProfession] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const customInputRef = useRef<HTMLInputElement>(null);
   const customBoxRef = useRef<HTMLDivElement>(null);
 
@@ -47,6 +47,7 @@ const ProfessionSelector: React.FC = () => {
   const handleContinue = async () => {
     if (!user || !selected || !canContinue) return;
     setSubmitting(true);
+    setSaveError(null);
     try {
       // For 'other', use the custom text as the Firestore profession value.
       // Category initialization still uses the 'other' ProfessionId so the
@@ -65,8 +66,12 @@ const ProfessionSelector: React.FC = () => {
         incomeCategories: income,
         expenseCategories: expense,
       });
+      // On success the onSnapshot in AuthContext will update userProfile,
+      // which causes App.tsx to navigate away from this screen automatically.
     } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('ProfessionSelector save failed:', msg);
+      setSaveError('Could not save your profession. Please check your connection and try again.');
     } finally {
       setSubmitting(false);
     }
@@ -244,6 +249,22 @@ const ProfessionSelector: React.FC = () => {
                 {PROFESSIONS.find((p) => p.id === selected)?.sublabel}
               </span>
             </motion.p>
+          )}
+        </AnimatePresence>
+
+        {/* Save error */}
+        <AnimatePresence>
+          {saveError && (
+            <motion.div
+              key="save-error"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 4 }}
+              className="mt-6 mx-auto max-w-md flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 dark:border-red-800/60 dark:bg-red-900/20"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-500 dark:text-red-400" />
+              <p className="text-sm font-medium text-red-700 dark:text-red-300">{saveError}</p>
+            </motion.div>
           )}
         </AnimatePresence>
 

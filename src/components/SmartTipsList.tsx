@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { db } from '../firebaseConfig';
 import { collection, onSnapshot, query, where, orderBy } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
@@ -6,6 +6,7 @@ import { Lightbulb, BookOpen, ArrowRight, Sparkles, Tag, CalendarDays, X } from 
 import { cn } from '../lib/utils';
 import { useLocalization } from '../contexts/LocalizationContext';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Blog {
   id: string;
@@ -16,6 +17,7 @@ interface Blog {
   category?: string;
   targetCategory?: string;
   status?: string;
+  targetUserIds?: string[];
   createdAt?: { toDate?: () => Date } | null;
 }
 
@@ -56,7 +58,8 @@ interface SmartTipsListProps {
 
 const SmartTipsList: React.FC<SmartTipsListProps> = ({ onBack }) => {
   const { language } = useLocalization();
-  const [blogs, setBlogs] = useState<Blog[]>([]);
+  const { user } = useAuth();
+  const [allBlogs, setAllBlogs] = useState<Blog[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedBlog, setSelectedBlog] = useState<Blog | null>(null);
 
@@ -69,7 +72,7 @@ const SmartTipsList: React.FC<SmartTipsListProps> = ({ onBack }) => {
     const unsub = onSnapshot(
       q,
       (snap) => {
-        setBlogs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Blog)));
+        setAllBlogs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Blog)));
         setLoading(false);
       },
       (err) => {
@@ -79,6 +82,16 @@ const SmartTipsList: React.FC<SmartTipsListProps> = ({ onBack }) => {
     );
     return unsub;
   }, []);
+
+  // Show blog if it's public (no targetUserIds / empty array) OR targeted specifically to current user
+  const blogs = useMemo(() => {
+    const uid = user?.uid;
+    return allBlogs.filter((b) => {
+      const targets = b.targetUserIds;
+      if (!targets || targets.length === 0) return true;
+      return uid ? targets.includes(uid) : false;
+    });
+  }, [allBlogs, user?.uid]);
 
   const openBlog = (blog: Blog) => {
     // Use existing hash-router to show full blog page

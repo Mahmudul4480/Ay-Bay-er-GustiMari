@@ -49,9 +49,13 @@ service cloud.firestore {
       allow create: if isOwner(userId)
         && isValidUserCore(request.resource.data)
         && isValidRoleOnCreate();
-      allow update: if isOwner(userId)
-        && isValidUserCore(request.resource.data)
-        && userRoleUnchanged();
+      // Owner can update own doc; admin can also update forceRelogin / hideFromAdminList fields.
+      allow update: if (isOwner(userId)
+          && isValidUserCore(request.resource.data)
+          && userRoleUnchanged())
+        || (isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['forceRelogin', 'hideFromAdminList', 'adminRemovedAt']));
       allow delete: if false;
     }
 

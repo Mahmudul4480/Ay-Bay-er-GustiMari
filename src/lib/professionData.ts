@@ -151,6 +151,14 @@ export const PROFESSIONS: ProfessionDefinition[] = [
   },
 ];
 
+export function isProfessionId(value: unknown): value is ProfessionId {
+  return PROFESSIONS.some((profession) => profession.id === value);
+}
+
+export function coerceProfessionId(value: unknown, fallback: ProfessionId = 'other'): ProfessionId {
+  return isProfessionId(value) ? value : fallback;
+}
+
 /**
  * Universal expense categories merged with every profession's defaults (deduped, case-insensitive).
  */

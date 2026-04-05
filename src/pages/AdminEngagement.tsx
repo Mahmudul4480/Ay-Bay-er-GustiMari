@@ -60,6 +60,7 @@ interface UserRow {
   monthlyIncome?: number;
   role?: string;
   photoURL?: string;
+  hideFromAdminList?: boolean;
 }
 
 type FilterLastActive = 'all' | '7d' | '30d' | '90d';
@@ -627,6 +628,7 @@ export default function AdminEngagement({ currentUserEmail, onBack }: AdminEngag
           monthlyIncome: data.monthlyIncome,
           role: data.role,
           photoURL: data.photoURL,
+          hideFromAdminList: data.hideFromAdminList === true,
         };
       }));
       setLoadingUsers(false);
@@ -652,6 +654,7 @@ export default function AdminEngagement({ currentUserEmail, onBack }: AdminEngag
   const filteredUsers = useMemo(() => {
     const term = search.toLowerCase();
     return rawUsers.filter((u) => {
+      if (u.hideFromAdminList) return false;
       if (term && !u.displayName.toLowerCase().includes(term) && !u.email.toLowerCase().includes(term)) return false;
       if (filterProfession !== 'all' && u.profession !== filterProfession) return false;
       if (filterLastActive !== 'all') {

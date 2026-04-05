@@ -4,6 +4,8 @@ import {
   collection,
   onSnapshot,
   addDoc,
+  doc,
+  updateDoc,
   serverTimestamp,
 } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
@@ -41,6 +43,12 @@ import {
   CheckCheck,
   Send,
   AlertCircle,
+  UserX,
+  Loader2 as SpinIcon,
+  Briefcase,
+  Clock,
+  Bell,
+  UserMinus,
 } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { useLocalization } from '../contexts/LocalizationContext';
@@ -144,7 +152,7 @@ type CampaignStep = 'select' | 'compose' | 'sent';
 
 interface CategoryUsersModalProps {
   category: string;
-  type: 'income' | 'expense';
+  type: 'income' | 'expense' | 'profession';
   users: CategoryUser[];
   language: 'en' | 'bn';
   onClose: () => void;
@@ -264,17 +272,22 @@ const CategoryUsersModal: React.FC<CategoryUsersModalProps> = ({
           'flex items-center justify-between gap-3 p-5 text-white shrink-0',
           type === 'expense'
             ? 'bg-gradient-to-r from-rose-600 to-red-500'
-            : 'bg-gradient-to-r from-emerald-600 to-teal-500'
+            : type === 'income'
+            ? 'bg-gradient-to-r from-emerald-600 to-teal-500'
+            : 'bg-gradient-to-r from-indigo-600 to-purple-600'
         )}>
           <div className="flex items-center gap-3 min-w-0">
             {type === 'expense'
               ? <TrendingDown className="w-5 h-5 shrink-0" />
-              : <TrendingUp className="w-5 h-5 shrink-0" />
+              : type === 'income'
+              ? <TrendingUp className="w-5 h-5 shrink-0" />
+              : <Briefcase className="w-5 h-5 shrink-0" />
             }
             <div className="min-w-0">
               <h3 className="font-black text-lg leading-tight truncate">{category}</h3>
               <p className="text-xs text-white/70 mt-0.5">
-                {users.length} user{users.length !== 1 ? 's' : ''} · {type === 'expense' ? 'Expense' : 'Income'} category
+                {users.length} user{users.length !== 1 ? 's' : ''} ·{' '}
+                {type === 'expense' ? 'Expense' : type === 'income' ? 'Income' : 'Profession'} category
               </p>
             </div>
           </div>
@@ -310,7 +323,7 @@ const CategoryUsersModal: React.FC<CategoryUsersModalProps> = ({
                   User ({users.length})
                 </span>
                 <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  {type === 'expense' ? 'Spent' : 'Earned'}
+                  {type === 'expense' ? 'Spent' : type === 'income' ? 'Earned' : 'Total Spend'}
                 </span>
               </div>
 
@@ -353,7 +366,9 @@ const CategoryUsersModal: React.FC<CategoryUsersModalProps> = ({
                       </div>
                       <span className={cn(
                         'text-sm font-bold shrink-0',
-                        type === 'expense' ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'
+                        type === 'expense' ? 'text-red-600 dark:text-red-400'
+                        : type === 'income' ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-indigo-600 dark:text-indigo-400'
                       )}>
                         {formatCurrency(u.categoryAmount, language)}
                       </span>
@@ -406,7 +421,7 @@ const CategoryUsersModal: React.FC<CategoryUsersModalProps> = ({
                   type="text"
                   value={notifTitle}
                   onChange={(e) => { setNotifTitle(e.target.value); setFormErrors((p) => ({ ...p, title: '' })); }}
-                  placeholder={`e.g. আপনার "${category}" খরচ সম্পর্কে একটি টিপস`}
+                  placeholder={type === 'profession' ? `e.g. "${category}" পেশাদারদের জন্য একটি টিপস` : `e.g. আপনার "${category}" খরচ সম্পর্কে একটি টিপস`}
                   className={cn(inputBase, formErrors.title && 'border-red-400 ring-1 ring-red-400')}
                 />
                 {formErrors.title && (
@@ -552,12 +567,26 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   // ── Modal state
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
   const [userTransactions, setUserTransactions] = useState<any[]>([]);
+  const [adminActionPendingUid, setAdminActionPendingUid] = useState<string | null>(null);
+  const [adminActionError, setAdminActionError] = useState<string | null>(null);
 
   // ── Category explorer state
   const [categoryModal, setCategoryModal] = useState<{ category: string; type: 'income' | 'expense' } | null>(null);
+  const [professionModal, setProfessionModal] = useState<{ id: string; name: string; userIds: string[] } | null>(null);
 
   // ── Category explorer tab
-  const [explorerTab, setExplorerTab] = useState<'expense' | 'income'>('expense');
+  const [explorerTab, setExplorerTab] = useState<'expense' | 'income' | 'profession'>('expense');
+
+  // ── Inactive users state
+  const [inactiveFilter, setInactiveFilter] = useState<1 | 3 | 5 | 7>(1);
+  const [inactiveSelectedUids, setInactiveSelectedUids] = useState<Set<string>>(new Set());
+  const [inactiveComposeOpen, setInactiveComposeOpen] = useState(false);
+  const [inactiveComposeTitle, setInactiveComposeTitle] = useState('');
+  const [inactiveComposeMsg, setInactiveComposeMsg] = useState('');
+  const [inactiveSending, setInactiveSending] = useState(false);
+  const [inactiveBlogId, setInactiveBlogId] = useState<string | null>(null);
+  const [inactiveSendError, setInactiveSendError] = useState<string | null>(null);
+  const [inactiveSendDone, setInactiveSendDone] = useState(false);
 
   // ── Firestore live listeners ─────────────────────────────────────────────────
   useEffect(() => {
@@ -685,13 +714,19 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
   // ── All-time category reports (all transactions, not month-limited) ──────────
 
+  // Categories that make no sense for income and should be excluded from income report
+  const EXCLUDED_FROM_INCOME = new Set(['Debit', 'debit', 'Credit Card Bill', 'Loan Installment']);
+
   const buildCategoryReport = useCallback((txType: 'income' | 'expense') => {
     const cats: Record<string, { total: number; users: Set<string> }> = {};
-    transactions.filter((t) => t.type === txType && t.category).forEach((t) => {
-      if (!cats[t.category]) cats[t.category] = { total: 0, users: new Set() };
-      cats[t.category].total += Number(t.amount) || 0;
-      if (t.userId) cats[t.category].users.add(t.userId);
-    });
+    transactions
+      .filter((t) => t.type === txType && t.category)
+      .filter((t) => txType !== 'income' || !EXCLUDED_FROM_INCOME.has(t.category))
+      .forEach((t) => {
+        if (!cats[t.category]) cats[t.category] = { total: 0, users: new Set() };
+        cats[t.category].total += Number(t.amount) || 0;
+        if (t.userId) cats[t.category].users.add(t.userId);
+      });
     const platformTotal = Object.values(cats).reduce((s, v) => s + v.total, 0);
     return Object.entries(cats)
       .map(([name, { total, users: us }]) => ({
@@ -705,6 +740,36 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
   const platformExpenseCategoryReport = useMemo(() => buildCategoryReport('expense'), [buildCategoryReport]);
   const platformIncomeCategoryReport  = useMemo(() => buildCategoryReport('income'),  [buildCategoryReport]);
+
+  /** Profession distribution from user sign-in data, enriched with transaction totals. */
+  const platformProfessionReport = useMemo(() => {
+    const profs: Record<string, { users: Set<string>; income: number; expense: number }> = {};
+    rawUsers.forEach((u: any) => {
+      const pid = u.profession || 'other';
+      if (!profs[pid]) profs[pid] = { users: new Set(), income: 0, expense: 0 };
+      profs[pid].users.add(u.id);
+    });
+    transactions.forEach((t) => {
+      if (!t.userId) return;
+      const user = rawUsers.find((u: any) => u.id === t.userId);
+      const pid = user?.profession || 'other';
+      if (!profs[pid]) profs[pid] = { users: new Set(), income: 0, expense: 0 };
+      if (t.type === 'income') profs[pid].income += Number(t.amount) || 0;
+      else if (t.type === 'expense') profs[pid].expense += Number(t.amount) || 0;
+    });
+    const totalUsers = rawUsers.length;
+    return Object.entries(profs)
+      .map(([id, { users: us, income, expense }]) => ({
+        id,
+        name: getProfessionLabel(id),
+        userCount: us.size,
+        userIds: [...us],
+        totalIncome: income,
+        totalExpense: expense,
+        pct: totalUsers > 0 ? (us.size / totalUsers) * 100 : 0,
+      }))
+      .sort((a, b) => b.userCount - a.userCount);
+  }, [rawUsers, transactions]);
 
   /** Users who have all-time transactions in the selected category. */
   const categoryModalUsers = useMemo((): CategoryUser[] => {
@@ -721,6 +786,49 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       .sort((a, b) => b.categoryAmount - a.categoryAmount);
   }, [categoryModal, transactions, rawUsers]);
 
+  /** Users in the selected profession for the profession modal. */
+  const professionModalUsers = useMemo((): CategoryUser[] => {
+    if (!professionModal) return [];
+    return rawUsers
+      .filter((u: any) => professionModal.userIds.includes(u.id))
+      .map((u: any) => {
+        const totalExpense = transactions
+          .filter((t) => t.userId === u.id && t.type === 'expense')
+          .reduce((s: number, t: any) => s + (Number(t.amount) || 0), 0);
+        return { id: u.id, displayName: u.displayName, email: u.email, photoURL: u.photoURL, profession: u.profession, categoryAmount: totalExpense };
+      })
+      .sort((a, b) => b.categoryAmount - a.categoryAmount);
+  }, [professionModal, rawUsers, transactions]);
+
+  /** Users inactive for at least inactiveFilter days (no transactions in that window). */
+  const inactiveUsers = useMemo(() => {
+    const lastTxMs: Record<string, number> = {};
+    transactions.forEach((t) => {
+      if (!t.userId) return;
+      const d = t.date?.toDate ? t.date.toDate() : t.date instanceof Date ? t.date : null;
+      if (!d) return;
+      const ms = d.getTime();
+      if (!lastTxMs[t.userId] || ms > lastTxMs[t.userId]) lastTxMs[t.userId] = ms;
+    });
+    const now = Date.now();
+    const thresholdMs = inactiveFilter * 86_400_000;
+    return rawUsers
+      .filter((u: any) => {
+        if (u.hideFromAdminList) return false;
+        const lastMs = lastTxMs[u.id];
+        if (lastMs !== undefined) return (now - lastMs) >= thresholdMs;
+        const createdMs = u.createdAt?.toMillis ? u.createdAt.toMillis() : null;
+        return createdMs ? (now - createdMs) >= thresholdMs : false;
+      })
+      .map((u: any) => {
+        const lastMs = lastTxMs[u.id];
+        const createdMs = u.createdAt?.toMillis ? u.createdAt.toMillis() : now;
+        const activityMs = lastMs ?? createdMs;
+        return { ...u, daysInactive: Math.floor((now - activityMs) / 86_400_000) };
+      })
+      .sort((a: any, b: any) => b.daysInactive - a.daysInactive);
+  }, [rawUsers, transactions, inactiveFilter]);
+
   const allExpenseCategories = useMemo(() => {
     const cats = new Set<string>();
     users.forEach((u) => Object.keys(u.categoryBreakdown).forEach((c) => cats.add(c)));
@@ -732,6 +840,11 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     rawUsers.forEach((u: any) => { if (u.profession) set.add(u.profession); });
     return [...set].sort();
   }, [rawUsers]);
+
+  const visibleUsers = useMemo(
+    () => users.filter((u) => !u.hideFromAdminList),
+    [users]
+  );
 
   /** Ranked users enriched with all-time behavioral intelligence from user_intelligence collection. */
   const intelligenceRows = useMemo(() => {
@@ -802,7 +915,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       .sort((a, b) => b.users.length - a.users.length);
   }, [userIntelligenceMap, rawUsers]);
 
-  const filteredUsers = useMemo(() => users.filter((u) => {
+  const filteredUsers = useMemo(() => visibleUsers.filter((u) => {
     const term = searchTerm.toLowerCase();
     if (term && !u.displayName?.toLowerCase().includes(term) && !u.email?.toLowerCase().includes(term)) return false;
     if (incomeMin && u.totalIncome < Number(incomeMin)) return false;
@@ -814,7 +927,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     if (filterProfession && u.profession !== filterProfession) return false;
     if (filterTag && !u.tags.includes(filterTag)) return false;
     return true;
-  }), [users, searchTerm, incomeMin, incomeMax, filterCategory, filterCategoryMin, filterProfession, filterTag]);
+  }), [visibleUsers, searchTerm, incomeMin, incomeMax, filterCategory, filterCategoryMin, filterProfession, filterTag]);
 
   const tooltipStyle = useCallback((): React.CSSProperties => {
     const dark = document.documentElement.classList.contains('dark');
@@ -864,6 +977,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   };
 
   const handleUserClick = (u: any) => {
+    setAdminActionError(null);
     setSelectedUser(u);
     setUserTransactions(
       transactionsThisMonth
@@ -872,6 +986,59 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         .slice(0, 8)
     );
   };
+
+  const forceUserRelogin = useCallback(async (targetUserId: string) => {
+    if (user?.email !== ADMIN_EMAIL) return;
+
+    setAdminActionPendingUid(targetUserId);
+    setAdminActionError(null);
+    try {
+      await updateDoc(doc(db, 'users', targetUserId), {
+        forceRelogin: true,
+        hideFromAdminList: true,
+        adminRemovedAt: serverTimestamp(),
+      });
+
+      if (selectedUser?.id === targetUserId) {
+        setSelectedUser(null);
+        setUserTransactions([]);
+      }
+    } catch (error) {
+      console.error('Failed to force re-login:', error);
+      setAdminActionError('Could not remove this user from the list right now. Please try again.');
+    } finally {
+      setAdminActionPendingUid(null);
+    }
+  }, [selectedUser?.id, user?.email]);
+
+  const sendInactiveCampaign = useCallback(async () => {
+    const uids = [...inactiveSelectedUids];
+    if (!uids.length || !inactiveComposeTitle.trim() || !inactiveComposeMsg.trim()) return;
+    setInactiveSending(true);
+    setInactiveSendError(null);
+    try {
+      const blogRef = await addDoc(collection(db, 'blogs'), {
+        title: inactiveComposeTitle.trim(),
+        blogContent: inactiveComposeMsg.trim(),
+        notificationMessage: inactiveComposeMsg.trim(),
+        imageUrl: '',
+        type: 'manual',
+        status: 'published',
+        category: 'Re-engagement',
+        targetUserIds: uids,
+        createdAt: serverTimestamp(),
+      });
+      setInactiveBlogId(blogRef.id);
+      await queueNotificationsForUsers(blogRef.id, uids, inactiveComposeTitle.trim(), inactiveComposeMsg.trim());
+      setInactiveSendDone(true);
+      setInactiveComposeOpen(false);
+      setInactiveSelectedUids(new Set());
+    } catch (e: any) {
+      setInactiveSendError(`Failed: ${String(e?.message ?? e)}`);
+    } finally {
+      setInactiveSending(false);
+    }
+  }, [inactiveSelectedUids, inactiveComposeTitle, inactiveComposeMsg]);
 
   // ── Loading ──────────────────────────────────────────────────────────────────
   if (loading) {
@@ -923,11 +1090,11 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const statCards = [
     {
       label: 'Total Users',
-      formatted: String(rawUsers.length),
+      formatted: String(visibleUsers.length),
       icon: Users,
       gradient: 'linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)',
       glow: 'rgba(99,102,241,0.45)',
-      sub: `${users.filter((u) => u.subscription === 'Premium').length} Premium`,
+      sub: `${visibleUsers.filter((u) => u.subscription === 'Premium').length} Premium`,
     },
     {
       label: 'Daily Active Users',
@@ -939,7 +1106,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     },
   ];
 
-  const activeExplorerReport = explorerTab === 'expense' ? platformExpenseCategoryReport : platformIncomeCategoryReport;
+  const activeExplorerReport = explorerTab === 'expense' ? platformExpenseCategoryReport : explorerTab === 'income' ? platformIncomeCategoryReport : [];
 
   return (
     <div className="w-full min-w-0 space-y-8 pb-24 sm:pb-20">
@@ -1083,45 +1250,113 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             </div>
             <div className="min-w-0">
               <h3 className="font-bold text-slate-800 dark:text-white">Category Intelligence Explorer</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Click any row to see users &amp; send manual campaign · All time</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {explorerTab === 'profession' ? 'User distribution by sign-in profession · All time' : 'Click any row to see users & send manual campaign · All time'}
+              </p>
             </div>
           </div>
           {/* Tab switcher */}
           <div className="flex rounded-2xl border border-slate-200 dark:border-slate-600 overflow-hidden shrink-0 self-start sm:self-auto">
-            {(['expense', 'income'] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setExplorerTab(tab)}
-                className={cn(
-                  'flex items-center gap-1.5 px-4 py-2 text-xs font-bold transition-all',
-                  explorerTab === tab
-                    ? tab === 'expense'
-                      ? 'bg-red-500 text-white'
-                      : 'bg-emerald-500 text-white'
-                    : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
-                )}
-              >
-                {tab === 'expense'
-                  ? <><TrendingDown className="w-3 h-3" /> Expense</>
-                  : <><TrendingUp className="w-3 h-3" /> Income</>
-                }
-              </button>
-            ))}
+            <button
+              onClick={() => setExplorerTab('expense')}
+              className={cn(
+                'flex items-center gap-1.5 px-4 py-2 text-xs font-bold transition-all',
+                explorerTab === 'expense'
+                  ? 'bg-red-500 text-white'
+                  : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
+              )}
+            >
+              <TrendingDown className="w-3 h-3" /> Expense
+            </button>
+            <button
+              onClick={() => setExplorerTab('income')}
+              className={cn(
+                'flex items-center gap-1.5 px-4 py-2 text-xs font-bold transition-all border-l border-slate-200 dark:border-slate-600',
+                explorerTab === 'income'
+                  ? 'bg-emerald-500 text-white'
+                  : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
+              )}
+            >
+              <TrendingUp className="w-3 h-3" /> Income
+            </button>
+            <button
+              onClick={() => setExplorerTab('profession')}
+              className={cn(
+                'flex items-center gap-1.5 px-4 py-2 text-xs font-bold transition-all border-l border-slate-200 dark:border-slate-600',
+                explorerTab === 'profession'
+                  ? 'bg-indigo-500 text-white'
+                  : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
+              )}
+            >
+              <Briefcase className="w-3 h-3" /> Profession
+            </button>
           </div>
         </div>
 
         {/* Table header */}
-        <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 px-5 py-3 bg-slate-50/80 dark:bg-slate-900/40 border-b border-slate-100 dark:border-slate-700 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-          <span>Category</span>
-          <span className="text-right">Users</span>
-          <span className="text-right w-28">Total</span>
-          <span className="hidden sm:block text-right w-24">Avg / User</span>
-          <span className="w-16 text-center">Target</span>
-        </div>
+        {explorerTab === 'profession' ? (
+          <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 px-5 py-3 bg-slate-50/80 dark:bg-slate-900/40 border-b border-slate-100 dark:border-slate-700 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            <span>Profession</span>
+            <span className="text-right w-16">Users</span>
+            <span className="text-right w-28">Income</span>
+            <span className="text-right w-28">Expense</span>
+            <span className="w-16 text-center">Target</span>
+          </div>
+        ) : (
+          <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 px-5 py-3 bg-slate-50/80 dark:bg-slate-900/40 border-b border-slate-100 dark:border-slate-700 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            <span>Category</span>
+            <span className="text-right">Users</span>
+            <span className="text-right w-28">Total</span>
+            <span className="hidden sm:block text-right w-24">Avg / User</span>
+            <span className="w-16 text-center">Target</span>
+          </div>
+        )}
 
-        {/* Category rows */}
+        {/* Rows */}
         <div className="divide-y divide-slate-100 dark:divide-slate-700/60 max-h-[28rem] overflow-y-auto">
-          {activeExplorerReport.length === 0 ? (
+          {explorerTab === 'profession' ? (
+            platformProfessionReport.length === 0 ? (
+              <p className="py-10 text-center text-sm text-slate-400">No profession data found.</p>
+            ) : (
+              platformProfessionReport.map((row, idx) => (
+                <motion.div
+                  key={row.id}
+                  layout
+                  onClick={() => setProfessionModal({ id: row.id, name: row.name, userIds: row.userIds })}
+                  className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-2 px-5 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors group cursor-pointer"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }} />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-200 truncate">{row.name}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <div className="w-16 sm:w-24 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-indigo-400 to-purple-500"
+                            style={{ width: `${Math.min(row.pct, 100)}%` }}
+                          />
+                        </div>
+                        <span className="text-[10px] font-bold text-slate-400">{row.pct.toFixed(1)}%</span>
+                      </div>
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400 text-right w-16">{row.userCount}</span>
+                  <span className="text-sm font-bold text-right w-28 text-emerald-600 dark:text-emerald-400">
+                    {formatCurrency(row.totalIncome, language)}
+                  </span>
+                  <span className="text-sm font-bold text-right w-28 text-red-600 dark:text-red-400">
+                    {formatCurrency(row.totalExpense, language)}
+                  </span>
+                  <div className="w-16 flex justify-center">
+                    <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-slate-100 dark:bg-slate-700 group-hover:bg-indigo-100 dark:group-hover:bg-indigo-900/40 transition-colors">
+                      <Target className="w-3 h-3 text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors" />
+                      <span className="text-[10px] font-bold text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors hidden sm:inline">Target</span>
+                    </div>
+                  </div>
+                </motion.div>
+              ))
+            )
+          ) : activeExplorerReport.length === 0 ? (
             <p className="py-10 text-center text-sm text-slate-400">No {explorerTab} data found.</p>
           ) : (
             activeExplorerReport.map((row, idx) => (
@@ -1129,7 +1364,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                 key={row.name}
                 layout
                 className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-2 px-5 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors group cursor-pointer"
-                onClick={() => setCategoryModal({ category: row.name, type: explorerTab })}
+                onClick={() => setCategoryModal({ category: row.name, type: explorerTab as 'income' | 'expense' })}
               >
                 {/* Name + bar */}
                 <div className="flex items-center gap-2.5 min-w-0">
@@ -1168,6 +1403,176 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             ))
           )}
         </div>
+      </motion.div>
+
+      {/* ── Inactive Users Panel ── */}
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+        className="neon-card overflow-hidden rounded-[2rem] border border-slate-200/80 dark:border-slate-700">
+
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 border-b border-slate-100 dark:border-slate-700 p-5 sm:p-6 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/20 dark:to-orange-950/10">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-100 dark:bg-amber-900/40">
+              <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="font-bold text-slate-800 dark:text-white">Inactive Users</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Sign in করেছে কিন্তু app use করছে না · Re-engage with targeted notifications
+              </p>
+            </div>
+          </div>
+          {/* Day filter buttons */}
+          <div className="flex rounded-2xl border border-slate-200 dark:border-slate-600 overflow-hidden shrink-0 self-start sm:self-auto">
+            {([1, 3, 5, 7] as const).map((d) => (
+              <button
+                key={d}
+                onClick={() => { setInactiveFilter(d); setInactiveSelectedUids(new Set()); setInactiveSendDone(false); setInactiveBlogId(null); }}
+                className={cn(
+                  'px-3.5 py-2 text-xs font-bold transition-all border-l first:border-l-0 border-slate-200 dark:border-slate-600',
+                  inactiveFilter === d
+                    ? 'bg-amber-500 text-white'
+                    : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-amber-50 dark:hover:bg-slate-700'
+                )}
+              >
+                {d}d+
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Success banner */}
+        {inactiveSendDone && inactiveBlogId && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            className="mx-5 mt-4 flex items-center gap-3 px-4 py-3 rounded-2xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700">
+            <CheckCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+            <p className="text-sm text-emerald-700 dark:text-emerald-300 flex-1 font-medium">Campaign sent successfully!</p>
+            <button onClick={() => { setInactiveSendDone(false); setInactiveBlogId(null); }} className="text-emerald-500 hover:text-emerald-700 transition-colors shrink-0">
+              <X className="w-4 h-4" />
+            </button>
+          </motion.div>
+        )}
+
+        {/* Table header */}
+        <div className="grid grid-cols-[auto_1fr_auto_auto_auto] gap-2 px-5 py-3 mt-1 bg-slate-50/80 dark:bg-slate-900/40 border-b border-slate-100 dark:border-slate-700 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+          <button
+            onClick={() => {
+              if (inactiveSelectedUids.size === inactiveUsers.length && inactiveUsers.length > 0) {
+                setInactiveSelectedUids(new Set());
+              } else {
+                setInactiveSelectedUids(new Set(inactiveUsers.map((u: any) => u.id)));
+              }
+            }}
+            className="text-slate-400 hover:text-indigo-600 transition-colors"
+          >
+            {inactiveSelectedUids.size === inactiveUsers.length && inactiveUsers.length > 0
+              ? <CheckSquare className="w-4 h-4 text-indigo-600" />
+              : <Square className="w-4 h-4" />
+            }
+          </button>
+          <span>User</span>
+          <span className="text-right hidden sm:block w-24">Profession</span>
+          <span className="text-right w-20">Inactive</span>
+          <span className="w-20 text-center">{inactiveFilter >= 7 ? 'Action' : 'Select'}</span>
+        </div>
+
+        {/* User rows */}
+        <div className="divide-y divide-slate-100 dark:divide-slate-700/60 max-h-[28rem] overflow-y-auto">
+          {inactiveUsers.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 py-14 text-slate-400">
+              <Activity className="w-8 h-8" />
+              <p className="text-sm">No users inactive for {inactiveFilter}+ day{inactiveFilter > 1 ? 's' : ''}.</p>
+            </div>
+          ) : (
+            inactiveUsers.map((u: any) => {
+              const isSel = inactiveSelectedUids.has(u.id);
+              return (
+                <motion.div
+                  key={u.id}
+                  layout
+                  className={cn(
+                    'grid grid-cols-[auto_1fr_auto_auto_auto] items-center gap-2 px-5 py-3 transition-colors',
+                    isSel ? 'bg-amber-50/60 dark:bg-amber-900/10' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'
+                  )}
+                >
+                  <button
+                    onClick={() => setInactiveSelectedUids((prev) => { const next = new Set(prev); next.has(u.id) ? next.delete(u.id) : next.add(u.id); return next; })}
+                    className="text-slate-400 hover:text-indigo-600 transition-colors shrink-0"
+                  >
+                    {isSel ? <CheckSquare className="w-4 h-4 text-indigo-600" /> : <Square className="w-4 h-4" />}
+                  </button>
+
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    {u.photoURL
+                      ? <img src={u.photoURL} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
+                      : <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white text-xs font-bold shrink-0">{(u.displayName || '?').charAt(0).toUpperCase()}</div>
+                    }
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-800 dark:text-white truncate">{u.displayName || 'Unknown'}</p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{u.email}</p>
+                    </div>
+                  </div>
+
+                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 hidden sm:block w-24 text-center truncate">
+                    {getProfessionLabel(u.profession)}
+                  </span>
+
+                  <span className={cn(
+                    'text-xs font-bold w-20 text-right',
+                    u.daysInactive >= 7 ? 'text-red-600 dark:text-red-400' : u.daysInactive >= 3 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'
+                  )}>
+                    {u.daysInactive}d ago
+                  </span>
+
+                  <div className="w-20 flex justify-center shrink-0">
+                    {inactiveFilter >= 7 ? (
+                      <button
+                        onClick={() => forceUserRelogin(u.id)}
+                        disabled={adminActionPendingUid === u.id}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/40 text-[10px] font-bold transition-all disabled:opacity-50"
+                      >
+                        {adminActionPendingUid === u.id
+                          ? <Loader2 className="w-3 h-3 animate-spin" />
+                          : <UserMinus className="w-3 h-3" />
+                        }
+                        {adminActionPendingUid === u.id ? '…' : 'Remove'}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setInactiveSelectedUids((prev) => { const next = new Set(prev); next.has(u.id) ? next.delete(u.id) : next.add(u.id); return next; })}
+                        className={cn(
+                          'p-1.5 rounded-xl border transition-all text-[10px] font-bold',
+                          isSel
+                            ? 'bg-indigo-600 border-indigo-600 text-white'
+                            : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-600 text-slate-500 hover:border-amber-400 hover:text-amber-600'
+                        )}
+                      >
+                        <Bell className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </motion.div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Footer — bulk send button */}
+        {inactiveSelectedUids.size > 0 && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+            className="border-t border-slate-100 dark:border-slate-700 p-4 flex items-center gap-3">
+            <p className="text-sm text-slate-500 dark:text-slate-400 flex-1">
+              <strong className="text-slate-700 dark:text-slate-200">{inactiveSelectedUids.size}</strong> user{inactiveSelectedUids.size !== 1 ? 's' : ''} selected
+            </p>
+            <button
+              onClick={() => { setInactiveComposeOpen(true); setInactiveSendError(null); setInactiveComposeTitle(''); setInactiveComposeMsg(''); }}
+              className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-bold text-sm rounded-2xl transition-all shadow-lg shadow-amber-500/25"
+            >
+              <Send className="w-4 h-4" />
+              Send Notification
+            </button>
+          </motion.div>
+        )}
       </motion.div>
 
       {/* ── User Intelligence Panel ── */}
@@ -1371,15 +1776,20 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             </div>
             <div>
               <h3 className="font-bold text-slate-800 dark:text-white">Lead Generation Table</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{filteredUsers.length} of {users.length} users</p>
+      <p className="text-xs text-slate-500 dark:text-slate-400">{filteredUsers.length} of {visibleUsers.length} users</p>
             </div>
           </div>
         </div>
+        {adminActionError && (
+          <div className="border-b border-rose-100 bg-rose-50 px-5 py-3 text-sm font-medium text-rose-700 dark:border-rose-900/40 dark:bg-rose-900/20 dark:text-rose-300">
+            {adminActionError}
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] text-left text-sm">
             <thead>
               <tr className="bg-slate-50/80 dark:bg-slate-900/40">
-                {['User', 'Email / Phone', 'Profession', 'Monthly Income', 'Top Category', 'Net Balance', 'Behaviour Tags', ''].map((h) => (
+                {['User', 'Email / Phone', 'Profession', 'Monthly Income', 'Top Category', 'Net Balance', 'Behaviour Tags', 'Action'].map((h) => (
                   <th key={h} className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">{h}</th>
                 ))}
               </tr>
@@ -1419,7 +1829,26 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                     </div>
                   </td>
                   <td className="px-5 py-4 text-right">
-                    <ChevronRight className="inline h-4 w-4 text-slate-300 transition-colors group-hover:text-indigo-500" />
+                    <div className="flex items-center justify-end gap-2">
+                      <motion.button
+                        type="button"
+                        whileHover={{ scale: 1.07 }}
+                        whileTap={{ scale: 0.93 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void forceUserRelogin(u.id);
+                        }}
+                        disabled={adminActionPendingUid === u.id}
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-rose-500 to-red-500 px-3 py-1.5 text-[11px] font-bold text-white shadow-md shadow-rose-400/30 transition-all hover:from-rose-600 hover:to-red-600 hover:shadow-rose-500/40 disabled:cursor-not-allowed disabled:opacity-50 dark:shadow-rose-900/40"
+                        title="Remove from list and force this user to sign in again"
+                      >
+                        {adminActionPendingUid === u.id
+                          ? <SpinIcon className="h-3 w-3 animate-spin" />
+                          : <UserX className="h-3.5 w-3.5" />}
+                        {adminActionPendingUid === u.id ? 'Removing…' : 'Remove'}
+                      </motion.button>
+                      <ChevronRight className="inline h-4 w-4 text-slate-300 transition-colors group-hover:text-indigo-500" />
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -1458,6 +1887,45 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
               </div>
 
               <div className="max-h-[70vh] overflow-y-auto p-6 space-y-6">
+                {/* ── Admin Remove Section ── */}
+                <div className="relative overflow-hidden rounded-2xl border border-rose-200/70 dark:border-rose-800/60"
+                  style={{ background: 'linear-gradient(135deg,#fff1f2 0%,#fff5f5 60%,#fef2f2 100%)' }}
+                >
+                  {/* Decorative glow blob */}
+                  <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-rose-400/15 blur-2xl" />
+
+                  <div className="relative flex flex-wrap items-center justify-between gap-4 p-4 dark:[background:linear-gradient(135deg,#2d1216_0%,#2a1010_100%)]">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-rose-100 dark:bg-rose-900/50 shadow-sm">
+                        <UserX className="h-4 w-4 text-rose-600 dark:text-rose-300" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-extrabold text-rose-800 dark:text-rose-200 leading-tight">
+                          Remove from Dashboard
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-rose-500 dark:text-rose-400 leading-relaxed">
+                          Hides this user &amp; forces a fresh sign-in on their device.
+                        </p>
+                      </div>
+                    </div>
+
+                    <motion.button
+                      type="button"
+                      whileHover={{ scale: 1.04 }}
+                      whileTap={{ scale: 0.96 }}
+                      onClick={() => void forceUserRelogin(selectedUser.id)}
+                      disabled={adminActionPendingUid === selectedUser.id}
+                      className="inline-flex shrink-0 items-center gap-2 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-rose-500/30 transition-all hover:from-rose-500 hover:to-red-500 hover:shadow-rose-500/50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {adminActionPendingUid === selectedUser.id ? (
+                        <><SpinIcon className="h-4 w-4 animate-spin" /> Removing…</>
+                      ) : (
+                        <><UserX className="h-4 w-4" /> Remove &amp; Sign Out</>
+                      )}
+                    </motion.button>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-3 gap-3">
                   {[
                     { label: 'Income', value: selectedUser.totalIncome, color: 'text-green-600 dark:text-green-400' },
@@ -1536,6 +2004,108 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             language={language as 'en' | 'bn'}
             onClose={() => setCategoryModal(null)}
           />
+        )}
+      </AnimatePresence>
+
+      {/* ── Profession Users Modal ── */}
+      <AnimatePresence>
+        {professionModal && (
+          <CategoryUsersModal
+            key={`profession-${professionModal.id}`}
+            category={professionModal.name}
+            type="profession"
+            users={professionModalUsers}
+            language={language as 'en' | 'bn'}
+            onClose={() => setProfessionModal(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Inactive Users Compose Modal ── */}
+      <AnimatePresence>
+        {inactiveComposeOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setInactiveComposeOpen(false)}
+              className="absolute inset-0 bg-slate-900/75 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.92, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: 24 }}
+              transition={{ type: 'spring', stiffness: 280, damping: 26 }}
+              className="relative w-full max-w-lg flex flex-col rounded-[2rem] bg-white dark:bg-slate-800 shadow-2xl ring-1 ring-white/20 overflow-hidden"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between gap-3 p-5 bg-gradient-to-r from-amber-500 to-orange-500 text-white shrink-0">
+                <div className="flex items-center gap-3 min-w-0">
+                  <Bell className="w-5 h-5 shrink-0" />
+                  <div className="min-w-0">
+                    <h3 className="font-black text-lg leading-tight">Re-engagement Campaign</h3>
+                    <p className="text-xs text-white/70 mt-0.5">
+                      {inactiveSelectedUids.size} user{inactiveSelectedUids.size !== 1 ? 's' : ''} · Inactive {inactiveFilter}+ days
+                    </p>
+                  </div>
+                </div>
+                <button onClick={() => setInactiveComposeOpen(false)} className="p-2 hover:bg-white/15 rounded-full transition-all shrink-0">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="p-5 space-y-4">
+                {inactiveSendError && (
+                  <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                    className="p-3 rounded-2xl border bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700 text-sm text-red-700 dark:text-red-300 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{inactiveSendError}</span>
+                  </motion.div>
+                )}
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Notification Title *</label>
+                  <input
+                    type="text"
+                    value={inactiveComposeTitle}
+                    onChange={(e) => setInactiveComposeTitle(e.target.value)}
+                    placeholder="e.g. আপনাকে মিস করছি! আবার ফিরে আসুন"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>Message *</span>
+                    <span className="font-normal text-slate-400 normal-case">(max 120 chars)</span>
+                  </label>
+                  <textarea
+                    value={inactiveComposeMsg}
+                    onChange={(e) => setInactiveComposeMsg(e.target.value)}
+                    rows={3}
+                    maxLength={120}
+                    placeholder="আপনার খরচ ট্র্যাক করুন — Ay Bay Er GustiMari আপনার জন্য অপেক্ষা করছে!"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all resize-none"
+                  />
+                  <p className="text-[10px] text-slate-400 text-right">{inactiveComposeMsg.length}/120</p>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="shrink-0 border-t border-slate-100 dark:border-slate-700 p-4">
+                <button
+                  onClick={sendInactiveCampaign}
+                  disabled={inactiveSending || !inactiveComposeTitle.trim() || !inactiveComposeMsg.trim()}
+                  className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 disabled:opacity-50 text-white font-bold text-sm rounded-2xl transition-all shadow-lg shadow-amber-500/25"
+                >
+                  {inactiveSending
+                    ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</>
+                    : <><Send className="w-4 h-4" /> Send to {inactiveSelectedUids.size} User{inactiveSelectedUids.size !== 1 ? 's' : ''}</>
+                  }
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

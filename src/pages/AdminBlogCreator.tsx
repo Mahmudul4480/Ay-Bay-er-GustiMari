@@ -615,12 +615,17 @@ export default function AdminBlogCreator({ currentUserEmail, onBack }: AdminBlog
           const task = uploadBytesResumable(fileRef, imageFile);
           task.on(
             'state_changed',
-            (snap) => setUploadProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
-            reject,
-            async () => {
-              resolvedImageUrl = await getDownloadURL(task.snapshot.ref);
-              setUploadProgress(null);
-              resolve();
+            (snap) => {
+              const pct = snap.totalBytes > 0
+                ? Math.round((snap.bytesTransferred / snap.totalBytes) * 100)
+                : 0;
+              setUploadProgress(pct);
+            },
+            (err) => reject(err),
+            () => {
+              getDownloadURL(task.snapshot.ref)
+                .then((url) => { resolvedImageUrl = url; setUploadProgress(null); resolve(); })
+                .catch((err) => reject(err));
             },
           );
         });

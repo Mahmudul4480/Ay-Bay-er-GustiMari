@@ -24,6 +24,7 @@ import WelcomeOverlay from './components/WelcomeOverlay';
 import { useFcmToken } from './hooks/useFcmToken';
 
 const ADMIN_EMAIL = 'chotan4480@gmail.com';
+const FORCE_RELOGIN_NOTICE_KEY = 'force-relogin-notice';
 
 function needsProfession(profile: { profession?: string } | null): boolean {
   if (!profile) return true;
@@ -80,6 +81,7 @@ const AppContent: React.FC = () => {
     return false;
   });
   const [loginError, setLoginError] = React.useState<string | null>(null);
+  const [loginNotice, setLoginNotice] = React.useState<string | null>(null);
   const [isMdUp, setIsMdUp] = React.useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(min-width: 768px)').matches : false
   );
@@ -89,6 +91,14 @@ const AppContent: React.FC = () => {
     const onChange = () => setIsMdUp(mq.matches);
     mq.addEventListener('change', onChange);
     return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const notice = sessionStorage.getItem(FORCE_RELOGIN_NOTICE_KEY);
+    if (!notice) return;
+    setLoginNotice(notice);
+    sessionStorage.removeItem(FORCE_RELOGIN_NOTICE_KEY);
   }, []);
 
   React.useEffect(() => {
@@ -213,6 +223,19 @@ const AppContent: React.FC = () => {
                   </p>
                 )}
               </div>
+            </motion.div>
+          )}
+
+          {loginNotice && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-blue-500/20 border border-blue-500/30 p-4 rounded-2xl flex items-start gap-3 text-left w-full"
+            >
+              <AlertTriangle className="w-5 h-5 text-blue-300 shrink-0 mt-0.5" />
+              <p className="text-xs text-blue-100 leading-relaxed">
+                {loginNotice}
+              </p>
             </motion.div>
           )}
 

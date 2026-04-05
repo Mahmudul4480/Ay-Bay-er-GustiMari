@@ -34,7 +34,10 @@ setPersistence(auth, browserLocalPersistence).catch((err) => {
 
 // Use the firestoreDatabaseId if provided in the config, otherwise default
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || "(default)");
-export const storage = getStorage(app);
+// Pass the bucket URL explicitly so the new `.firebasestorage.app` domain is used correctly
+export const storage = isConfigValid
+  ? getStorage(app, `gs://${firebaseConfig.storageBucket}`)
+  : getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 
 // ────────────────────────────────────────────────

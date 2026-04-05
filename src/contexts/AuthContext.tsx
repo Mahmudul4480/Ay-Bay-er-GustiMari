@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, onAuthStateChanged } from 'firebase/auth';
+import { User, onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth, db } from '../firebaseConfig';
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
@@ -80,10 +80,14 @@ export interface UserProfile {
   expenseCategories?: string[];
   role?: 'admin' | 'user';
   fixedFinanceRolloverMonth?: string;
+  forceRelogin?: boolean;
+  hideFromAdminList?: boolean;
+  adminRemovedAt?: unknown;
   createdAt?: unknown;
 }
 
 const AuthContext = createContext<AuthContextType>({ user: null, loading: true, userProfile: null });
+const FORCE_RELOGIN_NOTICE_KEY = 'force-relogin-notice';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -106,7 +110,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         unsubscribeProfile = onSnapshot(userDocRef, (docSnap) => {
           if (docSnap.exists()) {
             const profile = docSnap.data() as UserProfile;
+
+            if (profile.forceRelogin) {
+              sessionStorage.setItem(
+                FORCE_RELOGIN_NOTICE_KEY,
+                'Your session was reset by the admin. Please sign in again.'
+              );
+              updateDoc(userDocRef, { forceRelogin: false }).catch((err) => {
+                console.error('Failed to clear forceRelogin flag:', err);
+              });
+              signOut(auth).catch((err) => {
+                console.error('Forced sign-out failed:', err);
+              });
+              setUserProfile(null);
+              setLoading(false);
+              return;
+            }
+
             setUserProfile(profile);
+
+            if (profile.hideFromAdminList) {
+              updateDoc(userDocRef, {
+                hideFromAdminList: false,
+                adminRemovedAt: null,
+              }).catch((err) => {
+                console.error('Failed to restore admin-list visibility:', err);
+              });
+            }
+
             void initializeUniversalCategories(user.uid, profile.expenseCategories);
           } else {
             // Create profile if it doesn't exist — universals + starter lists, deduped

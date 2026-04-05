@@ -3,14 +3,13 @@ import { useAuth } from '../contexts/AuthContext';
 import { useLocalization } from '../contexts/LocalizationContext';
 import { db } from '../firebaseConfig';
 import { doc, updateDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { motion, AnimatePresence } from 'motion/react';
-import { Phone, TrendingUp, TrendingDown, Plus, Trash2, ArrowRight, CheckCircle } from 'lucide-react';
+import { Phone, TrendingUp, TrendingDown, Plus, Trash2, ArrowRight, CheckCircle, AlertTriangle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
+  coerceProfessionId,
   getDefaultCategoriesForProfession,
   mergeUniqueCategoryLists,
-  type ProfessionId,
 } from '../lib/professionData';
 
 const Onboarding: React.FC = () => {
@@ -21,6 +20,7 @@ const Onboarding: React.FC = () => {
   const [fixedIncomes, setFixedIncomes] = useState<{ name: string; amount: string }[]>([]);
   const [fixedExpenses, setFixedExpenses] = useState<{ name: string; amount: string }[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const addIncome = () => setFixedIncomes([...fixedIncomes, { name: '', amount: '' }]);
   const removeIncome = (index: number) => setFixedIncomes(fixedIncomes.filter((_, i) => i !== index));
@@ -41,9 +41,10 @@ const Onboarding: React.FC = () => {
   const handleFinish = async () => {
     if (!user) return;
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
       // 1. Merge universal + profession defaults, then add fixed-finance category names
-      const profId = (userProfile?.profession as ProfessionId) || 'student';
+      const profId = coerceProfessionId(userProfile?.profession, 'other');
       const base = getDefaultCategoriesForProfession(profId);
       const extraIncome = fixedIncomes.map((i) => i.name.trim()).filter(Boolean);
       const extraExpense = fixedExpenses.map((e) => e.name.trim()).filter(Boolean);
@@ -88,7 +89,13 @@ const Onboarding: React.FC = () => {
         }
       }
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.error('Onboarding save failed:', errMsg);
+      setSubmitError(
+        language === 'bn'
+          ? 'সেটআপ সম্পন্ন করা যায়নি। আবার চেষ্টা করুন।'
+          : 'Setup could not be completed. Please try again.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -129,11 +136,17 @@ const Onboarding: React.FC = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-sm font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Mobile Number</label>
+                  <label className="text-sm font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                    Mobile Number
+                    <span className="text-xs font-normal normal-case text-slate-400">
+                      {language === 'bn' ? '(ঐচ্ছিক)' : '(optional)'}
+                    </span>
+                  </label>
                   <input
                     type="tel"
                     value={phoneNumber}
                     onChange={(e) => setPhoneNumber(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') setStep(2); }}
                     placeholder="e.g. +880 1XXX XXXXXX"
                     className="w-full p-5 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-4 focus:ring-blue-500/20 outline-none dark:text-white text-lg font-medium transition-all"
                   />
@@ -141,8 +154,7 @@ const Onboarding: React.FC = () => {
 
                 <button
                   onClick={() => setStep(2)}
-                  disabled={!phoneNumber}
-                  className="w-full py-5 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full py-5 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none active:scale-95 flex items-center justify-center gap-2"
                 >
                   Continue <ArrowRight className="w-5 h-5" />
                 </button>
@@ -335,6 +347,17 @@ const Onboarding: React.FC = () => {
                     <span className="font-bold dark:text-white">{fixedExpenses.length} sources</span>
                   </div>
                 </div>
+
+                {submitError && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 dark:border-red-800 dark:bg-red-900/20"
+                  >
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-500 dark:text-red-400" />
+                    <p className="text-sm font-medium text-red-700 dark:text-red-300">{submitError}</p>
+                  </motion.div>
+                )}
 
                 <button
                   onClick={handleFinish}
