@@ -1,25 +1,26 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Gemini AI content generation for the Re-engagement Blog System
+// Uses the official @google/generative-ai SDK with JSON Mode enabled.
+// JSON Mode (responseMimeType: 'application/json') forces Gemini to emit a
+// bare JSON object — no markdown fences, no preamble prose — eliminating the
+// most common parse failure at the source.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
-const BASE_URL = 'https://generativelanguage.googleapis.com';
 
 /**
- * Ordered list of model + version combinations to try.
- * gemini-2.5-flash is the primary; older 1.5/2.0 models are NOT available on
- * new API keys (they return 404). Fallbacks cover regional availability gaps.
+ * Ordered list of model names to try.
+ * The SDK uses the v1beta endpoint internally; we just supply model IDs.
+ * Newer/preferred models come first; the loop falls through on 404s.
  */
 const MODEL_CANDIDATES = [
-  { version: 'v1beta', model: 'gemini-2.5-flash' },
-  { version: 'v1beta', model: 'gemini-2.5-flash-lite' },
-  { version: 'v1beta', model: 'gemini-2.0-flash-lite' },
-  { version: 'v1beta', model: 'gemini-flash-latest' },
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.0-flash-lite',
+  'gemini-1.5-flash',
 ] as const;
-
-function buildEndpoint(version: string, model: string): string {
-  return `${BASE_URL}/${version}/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
-}
 
 export interface GeneratedBlogContent {
   title: string;
@@ -29,7 +30,8 @@ export interface GeneratedBlogContent {
   ctaText: string;
 }
 
-// Map profession IDs → Bengali labels for the AI prompt
+// ─── Profession map → Bengali labels ─────────────────────────────────────────
+
 const PROFESSION_BN: Record<string, string> = {
   banker:        'ব্যাংকার',
   lawyer:        'আইনজীবী',
@@ -60,11 +62,12 @@ function getProfessionBn(profession: string): string {
   return PROFESSION_BN[key] ?? PROFESSION_BN['other'];
 }
 
+// ─── Prompt builder ───────────────────────────────────────────────────────────
+
 function buildPrompt(userName: string, profession: string, category?: string): string {
   const profBn = getProfessionBn(profession);
   const firstName = userName.split(' ')[0] || userName;
 
-  // When a specific spending/earning category is provided, focus the story on it
   const categoryContext = category
     ? `\nTarget category (IMPORTANT): "${category}"
 The title, story, and CTA must revolve specifically around this financial category.
@@ -78,56 +81,86 @@ Make the content feel like it was written just for someone who regularly spends/
   return `You are a witty, warm Bangladeshi content writer for a personal finance app called "Ay Bay Er GustiMari".
 
 IMPORTANT RULES:
-1. The app name is ALWAYS "Ay Bay Er GustiMari". NEVER use "GustiMari" alone — always write the full name.
-2. Respond ONLY with a valid JSON object — no markdown, no code fences, no extra text before or after the JSON.
+1. The app name is ALWAYS written as "Ay Bay Er GustiMari" — never abbreviated, never shortened. Every mention must use the full name.
+2. You are in JSON Mode. Output ONLY the raw JSON object. No markdown, no code fences, no extra text before or after the JSON.
+3. Every string value must be complete (no placeholders like "...") and non-empty.
 
-Generate re-engagement content for a user. Respond ONLY with a valid JSON object.
+Generate re-engagement content for a user.
 
 User context:
 - First name: ${firstName}
 - Full name: ${userName}
 - Profession: ${profession} (Bengali: ${profBn})${categoryContext}
 
-Required JSON keys (all values are strings):
+Required JSON keys (all values must be non-empty strings):
 {
   "title": "Catchy Bengali title ≤ 70 chars. Must address the user by profession label. Example: ${titleExample}",
   "notificationMessage": "Short Bengali notification body ≤ 120 chars. Conversational, friendly, creates curiosity. If a target category was given, hint at it.",
   "blogContent": "A 200-word funny and relatable Bengali story about the user's profession and money struggles${category ? `, specifically focused on the '${category}' category` : ''}. Use Bangla slang, humor, and a warm tone. End with a motivational sentence encouraging them to track their finances. Pure Bengali prose — no English sentences.",
   "imagePrompt": "English description for a fun 3D illustration${category ? ` related to '${category}' and the user's profession` : ' matching the profession'}. Pixar/cartoon style, bright pastel background.",
-  "ctaText": "Bengali call-to-action button text ≤ 35 chars. Example: 'হিসাব দেখতে এখানে ক্লিক করুন'"
+  "ctaText": "Bengali call-to-action button text. Must end with 'Ay Bay Er GustiMari-তে যান'. Example: 'আপনার হিসাব দেখুন - Ay Bay Er GustiMari-তে যান'"
 }
 
 Be creative, funny, and culturally relevant to Bangladesh. The story should make the user smile and feel understood.`;
 }
 
-/** Parse and validate the raw text returned by Gemini */
-function parseResponse(raw: string): GeneratedBlogContent {
-  if (!raw) throw new Error('Gemini returned an empty response. Please try again.');
+// ─── JSON sanitizer (safety net even with JSON Mode) ─────────────────────────
+// JSON Mode all but eliminates format errors, but edge cases still exist
+// (e.g. unescaped newlines inside long Bengali strings, trailing commas from
+// fine-tuned models). This runs as a second-pass fallback inside parseResponse.
 
-  // Primary strategy: extract the first {...} JSON object using a regex.
-  // This handles responses wrapped in markdown code fences or with extra preamble text.
-  let jsonString: string;
-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    jsonString = jsonMatch[0];
-  } else {
-    // Fallback: strip markdown code fences manually
-    jsonString = raw
-      .replace(/^```json\s*/im, '')
-      .replace(/^```\s*/im, '')
-      .replace(/```\s*$/im, '')
-      .trim();
+function sanitizeJson(text: string): string {
+  return text
+    .replace(/,\s*([}\]])/g, '$1')
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/gs, (_match, inner: string) =>
+      `"${inner.replace(/\n/g, '\\n').replace(/\r/g, '\\r')}"`,
+    );
+}
+
+// ─── Response parser — 4-stage bulletproof pipeline ──────────────────────────
+
+function parseResponse(raw: string): GeneratedBlogContent {
+  if (!raw || !raw.trim()) {
+    throw new Error('Gemini returned an empty response. Please try again.');
   }
 
-  let parsed: Partial<GeneratedBlogContent>;
+  // Stage 1 — extract outermost { … } block
+  // With JSON Mode this is usually the entire string, but we still strip any
+  // accidental wrapper text just in case.
+  const cleanedText =
+    raw.match(/\{[\s\S]*\}/)?.[0] ??
+    raw
+      .replace(/^```(?:json)?\s*/im, '')
+      .replace(/```\s*$/im, '')
+      .trim();
+
+  // Stage 2 — direct parse (succeeds >99% of the time with JSON Mode)
+  let parsed: Partial<GeneratedBlogContent> | null = null;
   try {
-    parsed = JSON.parse(jsonString);
+    parsed = JSON.parse(cleanedText);
   } catch {
+    // Stage 3 — sanitize common AI formatting quirks and retry
+    try {
+      parsed = JSON.parse(sanitizeJson(cleanedText));
+    } catch {
+      throw new Error(
+        "Could not parse Gemini's response as JSON even after sanitization.\n" +
+          'The AI may have returned a severely malformed format.\n' +
+          `Raw snippet: ${raw.slice(0, 400)}`,
+      );
+    }
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(
-      `Could not parse Gemini's response as JSON. The AI may have returned an unexpected format.\nSnippet: ${raw.slice(0, 300)}`
+      'Gemini returned a valid JSON value but it was not an object. Please try again.',
     );
   }
 
+  // Stage 4 — validate & fill required keys
   const required: (keyof GeneratedBlogContent)[] = [
     'title',
     'notificationMessage',
@@ -136,89 +169,93 @@ function parseResponse(raw: string): GeneratedBlogContent {
     'ctaText',
   ];
   for (const key of required) {
-    if (!parsed[key] || typeof parsed[key] !== 'string') {
-      parsed[key] = `[${key} not generated]`;
+    if (!parsed[key] || typeof parsed[key] !== 'string' || !(parsed[key] as string).trim()) {
+      parsed[key] = `[${key} — not generated, please edit before sending]`;
     }
+  }
+
+  // Stage 5 — enforce app name in ctaText fallback
+  // If Gemini forgot to include the app name in the CTA, append it.
+  const cta = parsed.ctaText as string;
+  if (!cta.includes('Ay Bay Er GustiMari') && !cta.startsWith('[')) {
+    parsed.ctaText = `${cta.replace(/[-–—]\s*$/, '').trim()} — Ay Bay Er GustiMari-তে যান`;
   }
 
   return parsed as GeneratedBlogContent;
 }
 
+// ─── Main export ──────────────────────────────────────────────────────────────
+
 /**
- * Calls the Gemini API with automatic model fallback.
- * Tries each candidate in MODEL_CANDIDATES order; skips 404s and moves on.
- * Throws a descriptive Error only when all candidates are exhausted.
+ * Generates personalised re-engagement blog content via the Gemini SDK.
+ *
+ * Strategy:
+ * - JSON Mode (responseMimeType: 'application/json') is set on every call so
+ *   Gemini never wraps its output in markdown fences.
+ * - maxOutputTokens is raised to 2000 so long Bengali blog posts are never
+ *   truncated mid-sentence.
+ * - The model list is tried in order; 404 responses (model unavailable for
+ *   this API key / region) are skipped silently.
+ * - 429 (quota exceeded) surfaces immediately — no point retrying other models.
+ * - parseResponse provides a 4-stage fallback even if JSON Mode somehow slips.
  */
 export async function generateBlogContent(
   userName: string,
   profession: string,
-  category?: string
+  category?: string,
 ): Promise<GeneratedBlogContent> {
   if (!GEMINI_API_KEY) {
     throw new Error(
-      'Gemini API key is not configured. Add VITE_GEMINI_API_KEY to your .env file.'
+      'Gemini API key is not configured. Add VITE_GEMINI_API_KEY to your .env file.',
     );
   }
 
-  const requestBody = JSON.stringify({
-    contents: [{ parts: [{ text: buildPrompt(userName, profession, category) }] }],
-    generationConfig: {
-      temperature: 0.9,
-      topP: 0.95,
-      maxOutputTokens: 1500,
-    },
-    safetySettings: [
-      { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
-      { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
-    ],
-  });
-
+  const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+  const prompt = buildPrompt(userName, profession, category);
   const errors: string[] = [];
 
-  for (const { version, model } of MODEL_CANDIDATES) {
-    const endpoint = buildEndpoint(version, model);
-
-    let response: Response;
+  for (const modelName of MODEL_CANDIDATES) {
     try {
-      response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: requestBody,
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        generationConfig: {
+          // JSON Mode: Gemini outputs bare JSON — no markdown, no fences
+          responseMimeType: 'application/json',
+          temperature: 0.9,
+          topP: 0.95,
+          maxOutputTokens: 2000,
+        },
       });
-    } catch (networkErr) {
-      errors.push(`${model} (${version}): network error — ${String(networkErr)}`);
-      continue;
+
+      const result = await model.generateContent(prompt);
+      const raw = result.response.text();
+
+      console.info(`[Gemini] Used model: ${modelName} — JSON Mode ✓`);
+      return parseResponse(raw);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+
+      // 429 — quota exceeded: surface immediately, retrying won't help
+      if (msg.includes('429') || /quota/i.test(msg)) {
+        throw new Error(
+          'Gemini API quota exceeded (429). Please wait a moment and try again.',
+        );
+      }
+
+      // 404 — model unavailable for this key/region: try next candidate
+      if (msg.includes('404') || /not found/i.test(msg)) {
+        errors.push(`${modelName}: 404 — not available for this API key`);
+        continue;
+      }
+
+      // Any other error: surface with context
+      throw new Error(`Gemini API error with model "${modelName}": ${msg.slice(0, 400)}`);
     }
-
-    // 404 → model not available for this key/region, try next candidate
-    if (response.status === 404) {
-      errors.push(`${model} (${version}): 404 not found`);
-      continue;
-    }
-
-    // 429 → quota exceeded — surface immediately, no point retrying other models
-    if (response.status === 429) {
-      throw new Error(
-        'Gemini API quota exceeded (429). Please wait a moment and try again.'
-      );
-    }
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(
-        `Gemini API error (${response.status}) with model "${model}": ${body.slice(0, 300)}`
-      );
-    }
-
-    const data: any = await response.json();
-    const raw: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-
-    console.info(`[Gemini] Used model: ${model} (${version})`);
-    return parseResponse(raw);
   }
 
-  // All candidates failed
+  // All candidates exhausted
   throw new Error(
-    `All Gemini model candidates returned 404.\nTried:\n${errors.join('\n')}\n\nVerify that VITE_GEMINI_API_KEY is valid and the Gemini API is enabled in your Google Cloud project.`
+    `All Gemini model candidates returned 404.\nTried:\n${errors.join('\n')}\n\n` +
+      'Verify that VITE_GEMINI_API_KEY is valid and the Gemini API is enabled in your Google Cloud project.',
   );
 }

@@ -115,18 +115,28 @@ export async function sendBrowserPreviewNotification(
 // ─── Queue notification for other users (Firestore queue) ────────────────────
 /**
  * Creates one Firestore document per target user in `notificationQueue`.
- * Each entry has a single `targetUserId` so a Cloud Function can process
- * them individually and dispatch FCM via the Admin SDK.
+ * Each entry has a single `userId` so a Cloud Function can process them
+ * individually and dispatch FCM via the Admin SDK.
+ *
+ * Schema matches what the Cloud Function (processNotificationQueue) expects:
+ *   userId       — who to notify
+ *   blogId       — which blog to link to
+ *   title        — notification title
+ *   message      — notification body text
+ *   clickAction  — deep-link URL the user lands on after tapping
+ *   status       — 'pending' until the Cloud Function processes it
+ *   batchId      — groups all entries from a single campaign send
+ *   createdAt    — server-side timestamp
  *
  * Returns a batchId string that groups all entries from the same campaign send.
  */
 export interface NotificationQueueEntry {
-  targetUserId: string;   // one entry per user
-  title: string;
-  body: string;
-  link: string;           // deep link e.g. /#/blog/:id
+  userId: string;          // one entry per user
   blogId: string;
-  batchId: string;        // groups all entries from a single send action
+  title: string;
+  message: string;         // notification body shown on device
+  clickAction: string;     // deep-link e.g. https://domain.com/#/blog/:id
+  batchId: string;         // groups all entries from a single send action
   status: 'pending' | 'sent' | 'failed';
   createdAt: ReturnType<typeof serverTimestamp>;
 }
@@ -135,25 +145,25 @@ export async function queueNotificationsForUsers(
   blogId: string,
   targetUserIds: string[],
   title: string,
-  body: string
+  message: string,
 ): Promise<string> {
-  const link = `/#/blog/${blogId}`;
+  const clickAction = `${window.location.origin}${window.location.pathname}#/blog/${blogId}`;
   const batchId = `batch_${Date.now()}`;
 
   // One document per user — Cloud Function picks each up independently
   await Promise.all(
-    targetUserIds.map((targetUserId) =>
+    targetUserIds.map((userId) =>
       addDoc(collection(db, 'notificationQueue'), {
-        targetUserId,
-        title,
-        body,
-        link,
+        userId,
         blogId,
+        title,
+        message,
+        clickAction,
         batchId,
         status: 'pending',
         createdAt: serverTimestamp(),
-      } satisfies Omit<NotificationQueueEntry, 'createdAt'> & { createdAt: ReturnType<typeof serverTimestamp> })
-    )
+      } satisfies Omit<NotificationQueueEntry, 'createdAt'> & { createdAt: ReturnType<typeof serverTimestamp> }),
+    ),
   );
 
   return batchId;

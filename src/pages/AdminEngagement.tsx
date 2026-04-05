@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   collection,
   onSnapshot,
@@ -7,16 +7,13 @@ import {
   Timestamp,
   query,
   orderBy,
-  doc,
-  updateDoc,
 } from 'firebase/firestore';
+import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Search,
   Filter,
-  Sparkles,
   Send,
-  Eye,
   CheckSquare,
   Square,
   Loader2,
@@ -32,17 +29,21 @@ import {
   ArrowLeft,
   Copy,
   CheckCheck,
-  RefreshCw,
   Target,
   FileText,
-  Image as ImageIcon,
-  MessageSquare,
   X,
-  Pencil,
+  BookOpen,
+  Tag,
+  ImageIcon,
+  Upload,
+  PlusCircle,
+  ListChecks,
+  AlertCircle,
+  Megaphone,
 } from 'lucide-react';
-import { db } from '../firebaseConfig';
-import { generateBlogContent, type GeneratedBlogContent } from '../lib/geminiApi';
-import { sendBrowserPreviewNotification, queueNotificationsForUsers } from '../lib/fcmUtils';
+import { db, storage } from '../firebaseConfig';
+import { queueNotificationsForUsers } from '../lib/fcmUtils';
+import { getProfessionLabel } from '../lib/professionData';
 import { cn } from '../lib/utils';
 
 const ADMIN_EMAIL = 'chotan4480@gmail.com';
@@ -62,6 +63,29 @@ interface UserRow {
 }
 
 type FilterLastActive = 'all' | '7d' | '30d' | '90d';
+type BlogSource = 'existing' | 'new';
+
+interface SavedBlog {
+  id: string;
+  title: string;
+  blogContent: string;
+  notificationMessage: string;
+  imageUrl?: string;
+  category?: string;
+  status?: string;
+  type?: string;
+  createdAt: Timestamp | null;
+}
+
+interface SendPayload {
+  notifTitle: string;
+  notifMessage: string;
+  blogSource: BlogSource;
+  selectedBlogId: string;
+  newBlogTitle: string;
+  newBlogContent: string;
+  imageFile: File | null;
+}
 
 interface AdminEngagementProps {
   currentUserEmail: string;
@@ -69,18 +93,6 @@ interface AdminEngagementProps {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function professionLabel(p: string): string {
-  const MAP: Record<string, string> = {
-    doctor: 'Doctor', engineer: 'Engineer', teacher: 'Teacher',
-    banker: 'Banker', businessman: 'Businessman', student: 'Student',
-    government: 'Govt. Employee', lawyer: 'Lawyer', farmer: 'Farmer',
-    freelancer: 'Freelancer', housewife: 'Housewife', military: 'Military',
-    journalist: 'Journalist', accountant: 'Accountant', nurse: 'Nurse',
-    pharmacist: 'Pharmacist', architect: 'Architect', pilot: 'Pilot',
-    chef: 'Chef', artist: 'Artist', other: 'Other',
-  };
-  return MAP[p?.toLowerCase()] ?? (p || 'Unknown');
-}
 
 function daysSince(ts: Timestamp | null): number {
   if (!ts) return 9999;
@@ -107,7 +119,8 @@ function Avatar({ user }: { user: UserRow }) {
       />
     );
   }
-  const initials = (user.displayName || '?').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+  const initials = (user.displayName || '?')
+    .split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
   return (
     <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
       {initials}
@@ -115,156 +128,460 @@ function Avatar({ user }: { user: UserRow }) {
   );
 }
 
-// ─── Content Preview Panel (editable) ────────────────────────────────────────
-function ContentPanel({
-  content,
-  targetUsers,
-  onSendPreview,
-  onSendToUsers,
-  onRegenerate,
-  sending,
+// ─── Campaign Success Card ────────────────────────────────────────────────────
+function CampaignSuccessCard({
   blogId,
+  batchId,
+  userCount,
+  onDismiss,
 }: {
-  content: GeneratedBlogContent;
-  targetUsers: UserRow[];
-  onSendPreview: (edited: GeneratedBlogContent) => void;
-  onSendToUsers: (edited: GeneratedBlogContent) => void;
-  onRegenerate: () => void;
-  sending: boolean;
-  blogId: string | null;
+  blogId: string;
+  batchId: string;
+  userCount: number;
+  onDismiss: () => void;
 }) {
-  // Own copy of the AI output — user can edit before sending
-  const [editedContent, setEditedContent] = useState<GeneratedBlogContent>({ ...content });
   const [copied, setCopied] = useState(false);
-
-  // Re-sync when a fresh generation arrives (Regenerate pressed)
-  useEffect(() => {
-    setEditedContent({ ...content });
-  }, [content]);
-
-  const updateField = (key: keyof GeneratedBlogContent, value: string) => {
-    setEditedContent((prev) => ({ ...prev, [key]: value }));
-  };
+  const deepLink = `${window.location.origin}${window.location.pathname}#/blog/${blogId}`;
 
   const copyLink = () => {
-    const url = `${window.location.origin}${window.location.pathname}#/blog/${blogId}`;
-    navigator.clipboard.writeText(url).catch(() => {});
+    navigator.clipboard.writeText(deepLink).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const fieldDefs: {
-    key: keyof GeneratedBlogContent;
-    icon: React.ReactNode;
-    label: string;
-    color: string;
-    multiline: boolean;
-    rows?: number;
-  }[] = [
-    { key: 'title',               icon: <MessageSquare className="w-3.5 h-3.5" />, label: 'Title',                color: 'indigo', multiline: false },
-    { key: 'notificationMessage', icon: <BellRing      className="w-3.5 h-3.5" />, label: 'Notification Message', color: 'amber',  multiline: true,  rows: 3 },
-    { key: 'blogContent',         icon: <FileText      className="w-3.5 h-3.5" />, label: 'Blog Content',         color: 'violet', multiline: true,  rows: 9 },
-    { key: 'imagePrompt',         icon: <ImageIcon     className="w-3.5 h-3.5" />, label: 'Image Prompt (AI)',    color: 'sky',    multiline: true,  rows: 3 },
-    { key: 'ctaText',             icon: <Target        className="w-3.5 h-3.5" />, label: 'CTA Button Text',      color: 'rose',   multiline: false },
-  ];
-
   return (
     <motion.div
-      initial={{ opacity: 0, x: 30 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 30 }}
-      transition={{ duration: 0.35 }}
-      className="flex flex-col gap-4 h-full overflow-y-auto pr-1"
+      initial={{ opacity: 0, scale: 0.94, y: 12 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      className="rounded-2xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 overflow-hidden"
     >
-      {/* Editable hint */}
-      <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-700">
-        <Pencil className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-        <p className="text-xs text-indigo-700 dark:text-indigo-300 font-medium">
-          All fields are editable. Fix any mistakes before sending.
-        </p>
-      </div>
-
-      {/* Actions row */}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex items-center gap-3 px-4 py-3.5 bg-emerald-500/10 dark:bg-emerald-500/5 border-b border-emerald-200 dark:border-emerald-700">
+        <div className="w-9 h-9 rounded-xl bg-emerald-500 flex items-center justify-center shrink-0 shadow-md shadow-emerald-900/20">
+          <CheckCheck className="w-5 h-5 text-white" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-extrabold text-emerald-800 dark:text-emerald-200">
+            Campaign Sent Successfully!
+          </p>
+          <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">
+            Blog published · {userCount} user{userCount !== 1 ? 's' : ''} queued for notification
+          </p>
+        </div>
         <button
-          onClick={onRegenerate}
-          disabled={sending}
-          className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 transition-all disabled:opacity-50"
+          onClick={onDismiss}
+          className="p-1 rounded-lg text-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-all shrink-0"
         >
-          <RefreshCw className="w-3 h-3" /> Regenerate
-        </button>
-        <button
-          onClick={() => onSendPreview(editedContent)}
-          disabled={sending}
-          className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-all disabled:opacity-50"
-        >
-          <Eye className="w-3 h-3" /> Preview (My Device)
-        </button>
-        <button
-          onClick={() => onSendToUsers(editedContent)}
-          disabled={sending || targetUsers.length === 0}
-          className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white transition-all disabled:opacity-50 shadow-md shadow-indigo-900/30"
-        >
-          {sending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
-          Send to {targetUsers.length} User{targetUsers.length !== 1 ? 's' : ''} Now
+          <X className="w-3.5 h-3.5" />
         </button>
       </div>
 
-      {/* Blog deep link */}
-      {blogId && (
-        <div className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700">
+      <div className="px-4 py-3 space-y-2.5">
+        <div className="flex items-center gap-2.5 text-xs">
+          <div className="w-6 h-6 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center shrink-0">
+            <BellRing className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+          </div>
+          <span className="text-slate-600 dark:text-slate-400">
+            <span className="font-bold text-slate-800 dark:text-white">{userCount}</span>
+            {' '}notification{userCount !== 1 ? 's' : ''} queued in{' '}
+            <code className="font-mono text-[11px] bg-slate-100 dark:bg-slate-700 px-1 rounded">notificationQueue</code>
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 p-2.5 rounded-xl bg-white dark:bg-slate-700/50 border border-emerald-100 dark:border-emerald-800">
           <FileText className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-          <span className="text-xs text-emerald-700 dark:text-emerald-300 flex-1 truncate font-mono">
+          <span className="text-[11px] text-emerald-700 dark:text-emerald-300 flex-1 truncate font-mono">
             #/blog/{blogId}
           </span>
-          <button onClick={copyLink} className="text-emerald-600 hover:text-emerald-700 transition-colors shrink-0">
+          <button onClick={copyLink} className="shrink-0 p-1 rounded text-emerald-500 hover:text-emerald-700 transition-colors">
             {copied ? <CheckCheck className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
           </button>
         </div>
-      )}
 
-      {/* Editable content fields */}
-      {fieldDefs.map(({ key, icon, label, color, multiline, rows }) => (
-        <div
-          key={key}
-          className={cn(
-            'rounded-2xl border p-3 space-y-2',
-            color === 'indigo' && 'bg-indigo-50/60 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-700',
-            color === 'amber'  && 'bg-amber-50/60  dark:bg-amber-900/20  border-amber-200  dark:border-amber-700',
-            color === 'violet' && 'bg-violet-50/60 dark:bg-violet-900/20 border-violet-200 dark:border-violet-700',
-            color === 'sky'    && 'bg-sky-50/60    dark:bg-sky-900/20    border-sky-200    dark:border-sky-700',
-            color === 'rose'   && 'bg-rose-50/60   dark:bg-rose-900/20   border-rose-200   dark:border-rose-700',
-          )}
-        >
-          <div className={cn(
-            'flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider',
-            color === 'indigo' && 'text-indigo-600 dark:text-indigo-400',
-            color === 'amber'  && 'text-amber-600  dark:text-amber-400',
-            color === 'violet' && 'text-violet-600 dark:text-violet-400',
-            color === 'sky'    && 'text-sky-600    dark:text-sky-400',
-            color === 'rose'   && 'text-rose-600   dark:text-rose-400',
-          )}>
-            {icon} {label}
-            <Pencil className="w-2.5 h-2.5 ml-auto opacity-40" />
-          </div>
-          {multiline ? (
-            <textarea
-              value={editedContent[key]}
-              onChange={(e) => updateField(key, e.target.value)}
-              rows={rows ?? 4}
-              className="w-full text-sm leading-relaxed bg-transparent resize-y focus:outline-none text-slate-700 dark:text-slate-200 border-0 p-0"
-            />
-          ) : (
+        <div className="flex items-center gap-2 text-[10px] text-slate-400">
+          <span className="font-mono bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded">
+            Batch: {batchId}
+          </span>
+          <span className="ml-auto">Deploy <code className="font-mono">processNotificationQueue</code> CF to dispatch FCM</span>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── Manual Campaign Form ─────────────────────────────────────────────────────
+function ManualCampaignForm({
+  savedBlogs,
+  targetUsers,
+  onSend,
+  sending,
+  uploadProgress,
+}: {
+  savedBlogs: SavedBlog[];
+  targetUsers: UserRow[];
+  onSend: (payload: SendPayload) => void;
+  sending: boolean;
+  uploadProgress: number | null;
+}) {
+  const [notifTitle, setNotifTitle] = useState('');
+  const [notifMessage, setNotifMessage] = useState('');
+  const [blogSource, setBlogSource] = useState<BlogSource>('existing');
+
+  // Existing blog picker
+  const [blogSearch, setBlogSearch] = useState('');
+  const [selectedBlogId, setSelectedBlogId] = useState('');
+
+  // New blog fields
+  const [newBlogTitle, setNewBlogTitle] = useState('');
+  const [newBlogContent, setNewBlogContent] = useState('');
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
+  const inputBase =
+    'w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all';
+
+  const filteredBlogs = useMemo(() => {
+    const term = blogSearch.toLowerCase();
+    return savedBlogs.filter(
+      (b) => !term || b.title?.toLowerCase().includes(term) || b.category?.toLowerCase().includes(term),
+    );
+  }, [savedBlogs, blogSearch]);
+
+  const selectedBlog = savedBlogs.find((b) => b.id === selectedBlogId);
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    setImageFile(file);
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImagePreview(file ? URL.createObjectURL(file) : null);
+  };
+
+  const clearImage = () => {
+    setImageFile(null);
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImagePreview(null);
+    if (imageInputRef.current) imageInputRef.current.value = '';
+  };
+
+  const validate = (): boolean => {
+    const errs: Record<string, string> = {};
+    if (!notifTitle.trim()) errs.notifTitle = 'Notification title is required';
+    if (!notifMessage.trim()) errs.notifMessage = 'Notification message is required';
+    if (blogSource === 'existing' && !selectedBlogId) errs.blog = 'Please select a blog';
+    if (blogSource === 'new' && !newBlogTitle.trim()) errs.newBlogTitle = 'Blog title is required';
+    if (blogSource === 'new' && !newBlogContent.trim()) errs.newBlogContent = 'Blog content is required';
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const handleSubmit = () => {
+    if (!validate()) return;
+    onSend({
+      notifTitle: notifTitle.trim(),
+      notifMessage: notifMessage.trim(),
+      blogSource,
+      selectedBlogId,
+      newBlogTitle: newBlogTitle.trim(),
+      newBlogContent: newBlogContent.trim(),
+      imageFile,
+    });
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* ── Section 1: Notification ── */}
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-3 bg-indigo-50 dark:bg-indigo-900/20 border-b border-slate-200 dark:border-slate-700">
+          <BellRing className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+          <p className="text-xs font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider">
+            Push Notification
+          </p>
+        </div>
+        <div className="p-4 space-y-3">
+          {/* Title */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+              Notification Title *
+            </label>
             <input
               type="text"
-              value={editedContent[key]}
-              onChange={(e) => updateField(key, e.target.value)}
-              className="w-full text-sm bg-transparent focus:outline-none text-slate-700 dark:text-slate-200 border-0 p-0"
+              value={notifTitle}
+              onChange={(e) => { setNotifTitle(e.target.value); setErrors((p) => ({ ...p, notifTitle: '' })); }}
+              placeholder="e.g. আপনার জন্য একটি বিশেষ বার্তা!"
+              className={cn(inputBase, errors.notifTitle && 'border-red-400 ring-1 ring-red-400')}
             />
+            {errors.notifTitle && (
+              <p className="flex items-center gap-1 text-[11px] text-red-500">
+                <AlertCircle className="w-3 h-3" /> {errors.notifTitle}
+              </p>
+            )}
+          </div>
+
+          {/* Message */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+              Notification Message *
+              <span className="ml-1 font-normal text-slate-400 normal-case">(max 120 chars)</span>
+            </label>
+            <textarea
+              value={notifMessage}
+              onChange={(e) => { setNotifMessage(e.target.value); setErrors((p) => ({ ...p, notifMessage: '' })); }}
+              rows={2}
+              maxLength={120}
+              placeholder="e.g. আজই আপনার খরচের হিসাব দেখুন এবং সঞ্চয় বাড়ান!"
+              className={cn(inputBase, 'resize-none', errors.notifMessage && 'border-red-400 ring-1 ring-red-400')}
+            />
+            <div className="flex items-center justify-between">
+              {errors.notifMessage
+                ? <p className="flex items-center gap-1 text-[11px] text-red-500"><AlertCircle className="w-3 h-3" />{errors.notifMessage}</p>
+                : <span />}
+              <span className="text-[10px] text-slate-400">{notifMessage.length}/120</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Section 2: Blog Source ── */}
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-3 bg-violet-50 dark:bg-violet-900/20 border-b border-slate-200 dark:border-slate-700">
+          <BookOpen className="w-4 h-4 text-violet-600 dark:text-violet-400 shrink-0" />
+          <p className="text-xs font-bold text-violet-700 dark:text-violet-300 uppercase tracking-wider">
+            Blog Content
+          </p>
+        </div>
+
+        {/* Source toggle */}
+        <div className="flex gap-1 p-3 border-b border-slate-100 dark:border-slate-700">
+          <button
+            onClick={() => setBlogSource('existing')}
+            className={cn(
+              'flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-bold rounded-xl transition-all',
+              blogSource === 'existing'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600',
+            )}
+          >
+            <ListChecks className="w-3.5 h-3.5" /> Select Existing Blog
+          </button>
+          <button
+            onClick={() => setBlogSource('new')}
+            className={cn(
+              'flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-bold rounded-xl transition-all',
+              blogSource === 'new'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600',
+            )}
+          >
+            <PlusCircle className="w-3.5 h-3.5" /> Create New Blog
+          </button>
+        </div>
+
+        <div className="p-4">
+          {/* ── EXISTING BLOG ── */}
+          {blogSource === 'existing' && (
+            <div className="space-y-3">
+              {/* Search */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={blogSearch}
+                  onChange={(e) => setBlogSearch(e.target.value)}
+                  placeholder="Search blogs…"
+                  className="w-full pl-8 pr-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-sm placeholder-slate-400 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {/* List */}
+              <div className="max-h-52 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-600 divide-y divide-slate-100 dark:divide-slate-700">
+                {filteredBlogs.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-8 gap-2 text-slate-400">
+                    <BookOpen className="w-7 h-7" />
+                    <p className="text-xs">No blogs found. Create one below or in Blog Manager.</p>
+                  </div>
+                ) : (
+                  filteredBlogs.map((blog) => {
+                    const isSel = blog.id === selectedBlogId;
+                    return (
+                      <button
+                        key={blog.id}
+                        onClick={() => { setSelectedBlogId(blog.id); setErrors((p) => ({ ...p, blog: '' })); }}
+                        className={cn(
+                          'w-full flex items-start gap-3 px-3 py-2.5 text-left transition-colors',
+                          isSel ? 'bg-indigo-50 dark:bg-indigo-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/40',
+                        )}
+                      >
+                        <div className={cn(
+                          'w-4 h-4 rounded-full border-2 shrink-0 mt-0.5 transition-all',
+                          isSel ? 'border-indigo-600 bg-indigo-600' : 'border-slate-300 dark:border-slate-500',
+                        )}>
+                          {isSel && <div className="w-1.5 h-1.5 rounded-full bg-white mx-auto mt-0.5" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-slate-800 dark:text-white line-clamp-1">
+                            {blog.title}
+                          </p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            {blog.category && (
+                              <span className="flex items-center gap-0.5 text-[10px] text-indigo-500 font-medium">
+                                <Tag className="w-2.5 h-2.5" />{blog.category}
+                              </span>
+                            )}
+                            <span className="text-[10px] text-slate-400 ml-auto">
+                              {blog.createdAt?.toDate().toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) ?? '—'}
+                            </span>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Selected preview */}
+              {selectedBlog && (
+                <motion.div
+                  key={selectedBlog.id}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-700"
+                >
+                  <p className="text-xs font-bold text-indigo-800 dark:text-indigo-200 line-clamp-1">{selectedBlog.title}</p>
+                  <p className="text-[11px] text-indigo-600/70 dark:text-indigo-400/70 line-clamp-2 mt-0.5 leading-relaxed">
+                    {selectedBlog.blogContent?.slice(0, 120)}…
+                  </p>
+                </motion.div>
+              )}
+
+              {errors.blog && (
+                <p className="flex items-center gap-1 text-[11px] text-red-500">
+                  <AlertCircle className="w-3 h-3" /> {errors.blog}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* ── NEW BLOG ── */}
+          {blogSource === 'new' && (
+            <div className="space-y-3">
+              {/* Blog title */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                  Blog Title *
+                </label>
+                <input
+                  type="text"
+                  value={newBlogTitle}
+                  onChange={(e) => { setNewBlogTitle(e.target.value); setErrors((p) => ({ ...p, newBlogTitle: '' })); }}
+                  placeholder="e.g. আপনার ঈদের বাজেট কি ঠিক আছে?"
+                  className={cn(inputBase, errors.newBlogTitle && 'border-red-400 ring-1 ring-red-400')}
+                />
+                {errors.newBlogTitle && (
+                  <p className="flex items-center gap-1 text-[11px] text-red-500">
+                    <AlertCircle className="w-3 h-3" />{errors.newBlogTitle}
+                  </p>
+                )}
+              </div>
+
+              {/* Blog content */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                  Blog Content *
+                </label>
+                <textarea
+                  value={newBlogContent}
+                  onChange={(e) => { setNewBlogContent(e.target.value); setErrors((p) => ({ ...p, newBlogContent: '' })); }}
+                  rows={7}
+                  placeholder="ব্লগের মূল বিষয়বস্তু এখানে লিখুন…"
+                  className={cn(inputBase, 'resize-y leading-relaxed', errors.newBlogContent && 'border-red-400 ring-1 ring-red-400')}
+                />
+                {errors.newBlogContent && (
+                  <p className="flex items-center gap-1 text-[11px] text-red-500">
+                    <AlertCircle className="w-3 h-3" />{errors.newBlogContent}
+                  </p>
+                )}
+              </div>
+
+              {/* Image upload */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                  <ImageIcon className="w-3 h-3" /> Cover Image
+                  <span className="font-normal normal-case text-slate-400">(optional · JPG/PNG/WEBP · max 5 MB)</span>
+                </label>
+
+                {imagePreview ? (
+                  <div className="relative rounded-xl overflow-hidden border border-slate-200 dark:border-slate-600">
+                    <img
+                      src={imagePreview}
+                      alt="Preview"
+                      className="w-full h-36 object-cover"
+                    />
+                    <button
+                      onClick={clearImage}
+                      className="absolute top-2 right-2 p-1.5 rounded-xl bg-black/50 hover:bg-black/70 text-white transition-all"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                    <div className="absolute bottom-2 left-2">
+                      <span className="px-2 py-0.5 rounded-full bg-black/50 text-white text-[10px] font-medium">
+                        {imageFile?.name}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => imageInputRef.current?.click()}
+                    className="w-full flex flex-col items-center justify-center gap-2 py-6 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 hover:border-indigo-400 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/10 transition-all text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400"
+                  >
+                    <Upload className="w-6 h-6" />
+                    <span className="text-xs font-medium">Click to upload image</span>
+                  </button>
+                )}
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  onChange={handleImageChange}
+                  className="hidden"
+                />
+              </div>
+
+              {/* Upload progress */}
+              {uploadProgress !== null && (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px] text-slate-500">
+                    <span>Uploading image…</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className="h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                    <motion.div
+                      className="h-full bg-indigo-500 rounded-full"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${uploadProgress}%` }}
+                      transition={{ duration: 0.3 }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </div>
-      ))}
-    </motion.div>
+      </div>
+
+      {/* ── Send Button ── */}
+      <button
+        onClick={handleSubmit}
+        disabled={sending || targetUsers.length === 0}
+        className="w-full flex items-center justify-center gap-2.5 py-4 px-6 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-sm transition-all disabled:opacity-50 shadow-lg shadow-indigo-900/20"
+      >
+        {sending
+          ? <><Loader2 className="w-4 h-4 animate-spin" /> Processing…</>
+          : <><Send className="w-4 h-4" /> Send Campaign to {targetUsers.length} User{targetUsers.length !== 1 ? 's' : ''}</>}
+      </button>
+    </div>
   );
 }
 
@@ -275,6 +592,7 @@ export default function AdminEngagement({ currentUserEmail, onBack }: AdminEngag
   // ── Data ──
   const [rawUsers, setRawUsers] = useState<UserRow[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
+  const [savedBlogs, setSavedBlogs] = useState<SavedBlog[]>([]);
 
   // ── Filters ──
   const [search, setSearch] = useState('');
@@ -284,24 +602,19 @@ export default function AdminEngagement({ currentUserEmail, onBack }: AdminEngag
 
   // ── Selection ──
   const [selectedUids, setSelectedUids] = useState<Set<string>>(new Set());
-
-  // ── AI & Blog ──
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedContent, setGeneratedContent] = useState<GeneratedBlogContent | null>(null);
-  const [generatedBlogId, setGeneratedBlogId] = useState<string | null>(null);
-  const [genError, setGenError] = useState<string | null>(null);
-  const [isSending, setIsSending] = useState(false);
-  const [sendResult, setSendResult] = useState<string | null>(null);
-
-  // ── Panel target user (for single-user mode) ──
   const [panelTargetUid, setPanelTargetUid] = useState<string | null>(null);
+
+  // ── Send state ──
+  const [isSending, setIsSending] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [sendResult, setSendResult] = useState<string | null>(null);
 
   // ── Fetch users ──
   useEffect(() => {
     if (!isAdmin) return;
     const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
     const unsub = onSnapshot(q, (snap) => {
-      const rows: UserRow[] = snap.docs.map((d) => {
+      setRawUsers(snap.docs.map((d) => {
         const data = d.data() as Record<string, any>;
         return {
           uid: d.id,
@@ -315,20 +628,27 @@ export default function AdminEngagement({ currentUserEmail, onBack }: AdminEngag
           role: data.role,
           photoURL: data.photoURL,
         };
-      });
-      setRawUsers(rows);
+      }));
       setLoadingUsers(false);
     }, () => setLoadingUsers(false));
     return unsub;
   }, [isAdmin]);
 
-  // ── Unique professions for filter dropdown ──
+  // ── Fetch blogs ──
+  useEffect(() => {
+    if (!isAdmin) return;
+    const q = query(collection(db, 'blogs'), orderBy('createdAt', 'desc'));
+    const unsub = onSnapshot(q, (snap) => {
+      setSavedBlogs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as SavedBlog)));
+    });
+    return unsub;
+  }, [isAdmin]);
+
   const allProfessions = useMemo(() => {
     const set = new Set(rawUsers.map((u) => u.profession).filter(Boolean));
     return Array.from(set).sort();
   }, [rawUsers]);
 
-  // ── Filtered users ──
   const filteredUsers = useMemo(() => {
     const term = search.toLowerCase();
     return rawUsers.filter((u) => {
@@ -342,17 +662,13 @@ export default function AdminEngagement({ currentUserEmail, onBack }: AdminEngag
     });
   }, [rawUsers, search, filterProfession, filterLastActive]);
 
-  // ── Effective target users (panel or selection) ──
   const targetUsers: UserRow[] = useMemo(() => {
-    if (panelTargetUid) {
-      return rawUsers.filter((u) => u.uid === panelTargetUid);
-    }
+    if (panelTargetUid) return rawUsers.filter((u) => u.uid === panelTargetUid);
     return rawUsers.filter((u) => selectedUids.has(u.uid));
   }, [panelTargetUid, selectedUids, rawUsers]);
 
   const isPanelOpen = targetUsers.length > 0;
 
-  // ── Toggle selection ──
   const toggleSelect = useCallback((uid: string) => {
     setSelectedUids((prev) => {
       const next = new Set(prev);
@@ -374,101 +690,92 @@ export default function AdminEngagement({ currentUserEmail, onBack }: AdminEngag
   const targetSingle = (uid: string) => {
     setPanelTargetUid(uid);
     setSelectedUids(new Set());
-    setGeneratedContent(null);
-    setGeneratedBlogId(null);
-    setGenError(null);
     setSendResult(null);
   };
 
   const closePanel = () => {
     setPanelTargetUid(null);
     setSelectedUids(new Set());
-    setGeneratedContent(null);
-    setGeneratedBlogId(null);
-    setGenError(null);
     setSendResult(null);
+    setUploadProgress(null);
   };
 
-  // ── Generate AI content ──
-  const generateContent = useCallback(async () => {
-    const first = targetUsers[0];
-    if (!first) return;
-    setIsGenerating(true);
-    setGenError(null);
-    setGeneratedContent(null);
-    setGeneratedBlogId(null);
-    setSendResult(null);
-    try {
-      const content = await generateBlogContent(first.displayName, first.profession);
-      setGeneratedContent(content);
-
-      // Save blog to Firestore immediately
-      const ref = await addDoc(collection(db, 'blogs'), {
-        title: content.title,
-        notificationMessage: content.notificationMessage,
-        blogContent: content.blogContent,
-        imagePrompt: content.imagePrompt,
-        ctaText: content.ctaText,
-        targetUserIds: targetUsers.map((u) => u.uid),
-        targetUserName: first.displayName,
-        targetProfession: first.profession,
-        createdAt: serverTimestamp(),
-        status: 'draft',
-      });
-      setGeneratedBlogId(ref.id);
-    } catch (e: any) {
-      setGenError(String(e?.message ?? e));
-    } finally {
-      setIsGenerating(false);
+  // ── Send manual campaign ──
+  const sendManualCampaign = useCallback(async (payload: SendPayload) => {
+    if (!isAdmin) {
+      setSendResult(`❌ Unauthorised. Only ${ADMIN_EMAIL} can send campaigns.`);
+      return;
     }
-  }, [targetUsers]);
+    if (targetUsers.length === 0) return;
 
-  // ── Send Preview (admin's device only, uses edited content) ──
-  const sendPreview = async (editedContent: GeneratedBlogContent) => {
-    const ok = await sendBrowserPreviewNotification(
-      editedContent.title,
-      editedContent.notificationMessage,
-      `/#/blog/${generatedBlogId}`
-    );
-    setSendResult(ok
-      ? '✅ Preview notification sent to your device!'
-      : '❌ Could not send preview — check browser notification permissions.'
-    );
-  };
-
-  // ── Send to selected users (persist edits → Firestore, then queue) ──
-  const sendToUsers = async (editedContent: GeneratedBlogContent) => {
-    if (!generatedBlogId || targetUsers.length === 0) return;
     setIsSending(true);
-    try {
-      // Persist manual edits back to the draft blog document
-      await updateDoc(doc(db, 'blogs', generatedBlogId), {
-        title: editedContent.title,
-        notificationMessage: editedContent.notificationMessage,
-        blogContent: editedContent.blogContent,
-        imagePrompt: editedContent.imagePrompt,
-        ctaText: editedContent.ctaText,
-        status: 'published',
-      });
+    setSendResult(null);
+    setUploadProgress(null);
 
-      const queueId = await queueNotificationsForUsers(
-        generatedBlogId,
+    try {
+      let blogId: string;
+
+      if (payload.blogSource === 'existing') {
+        // Use the selected existing blog directly
+        blogId = payload.selectedBlogId;
+      } else {
+        // Step 1 — Upload image to Firebase Storage if provided
+        let imageUrl = '';
+        if (payload.imageFile) {
+          const fileRef = storageRef(
+            storage,
+            `blog_images/${Date.now()}_${payload.imageFile.name.replace(/\s+/g, '_')}`,
+          );
+          await new Promise<void>((resolve, reject) => {
+            const task = uploadBytesResumable(fileRef, payload.imageFile!);
+            task.on(
+              'state_changed',
+              (snap) => setUploadProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
+              reject,
+              async () => {
+                imageUrl = await getDownloadURL(task.snapshot.ref);
+                setUploadProgress(null);
+                resolve();
+              },
+            );
+          });
+        }
+
+        // Step 2 — Save new blog to Firestore
+        const blogRef = await addDoc(collection(db, 'blogs'), {
+          title: payload.newBlogTitle,
+          blogContent: payload.newBlogContent,
+          notificationMessage: payload.notifMessage,
+          imageUrl,
+          imagePrompt: '',
+          ctaText: 'আপনার আজকের হিসাবটি লিখুন — Ay Bay Er GustiMari-তে যান',
+          type: 'manual',
+          status: 'published',
+          category: 'General',
+          targetUserIds: targetUsers.map((u) => u.uid),
+          createdAt: serverTimestamp(),
+        });
+        blogId = blogRef.id;
+      }
+
+      // Step 3 — Write one notificationQueue doc per user
+      const batchId = await queueNotificationsForUsers(
+        blogId,
         targetUsers.map((u) => u.uid),
-        editedContent.title,
-        editedContent.notificationMessage
+        payload.notifTitle,
+        payload.notifMessage,
       );
-      const firstName = targetUsers[0]?.displayName || 'User';
-      setSendResult(
-        `✅ Campaign sent to ${targetUsers.length} user${targetUsers.length !== 1 ? 's' : ''}${targetUsers.length === 1 ? ` (${firstName})` : ''}!\n🔗 Blog: #/blog/${generatedBlogId}\nQueue ID: ${queueId}\n💡 Deploy 'processNotificationQueue' Cloud Function to dispatch FCM pushes.`
-      );
+
+      setSendResult(`SUCCESS:${blogId}:${batchId}:${targetUsers.length}`);
     } catch (e: any) {
       setSendResult(`❌ Failed: ${String(e?.message ?? e)}`);
+      setUploadProgress(null);
     } finally {
       setIsSending(false);
     }
-  };
+  }, [isAdmin, targetUsers]);
 
-  // ─── Access Denied screen ───────────────────────────────────────────────────
+  // ─── Access Denied ────────────────────────────────────────────────────────
   if (!isAdmin) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-red-950 via-rose-900 to-slate-900 flex flex-col items-center justify-center gap-6 p-8">
@@ -501,7 +808,7 @@ export default function AdminEngagement({ currentUserEmail, onBack }: AdminEngag
     );
   }
 
-  // ─── Main UI ─────────────────────────────────────────────────────────────────
+  // ─── Main UI ──────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors">
       {/* ── Header ── */}
@@ -515,9 +822,9 @@ export default function AdminEngagement({ currentUserEmail, onBack }: AdminEngag
           </button>
           <div className="flex-1 min-w-0">
             <h1 className="text-lg font-extrabold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent truncate">
-              User Re-engagement Dashboard
+              Campaign Manager
             </h1>
-            <p className="text-xs text-slate-400 truncate">AI-powered blog & notification system</p>
+            <p className="text-xs text-slate-400 truncate">Select users · compose campaign · send notification</p>
           </div>
           <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-700 rounded-full">
             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -528,7 +835,6 @@ export default function AdminEngagement({ currentUserEmail, onBack }: AdminEngag
         </div>
       </div>
 
-      {/* ── User Table (full-width — modal opens on top) ── */}
       <div className="max-w-7xl mx-auto p-4 sm:p-6">
         <div className="flex flex-col gap-4">
 
@@ -550,7 +856,7 @@ export default function AdminEngagement({ currentUserEmail, onBack }: AdminEngag
                 'flex items-center gap-2 px-4 py-2.5 rounded-2xl border text-sm font-medium transition-all shrink-0',
                 showFilters
                   ? 'bg-indigo-600 border-indigo-600 text-white'
-                  : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:border-indigo-400'
+                  : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:border-indigo-400',
               )}
             >
               <Filter className="w-4 h-4" />
@@ -579,12 +885,12 @@ export default function AdminEngagement({ currentUserEmail, onBack }: AdminEngag
                     >
                       <option value="all">All Professions</option>
                       {allProfessions.map((p) => (
-                        <option key={p} value={p}>{professionLabel(p)}</option>
+                        <option key={p} value={p}>{getProfessionLabel(p)}</option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-1.5 block uppercase tracking-wider">Joined (Last Active)</label>
+                    <label className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-1.5 block uppercase tracking-wider">Joined</label>
                     <select
                       value={filterLastActive}
                       onChange={(e) => setFilterLastActive(e.target.value as FilterLastActive)}
@@ -610,41 +916,33 @@ export default function AdminEngagement({ currentUserEmail, onBack }: AdminEngag
             >
               <CheckSquare className="w-4 h-4 text-indigo-600 shrink-0" />
               <span className="text-sm font-bold text-indigo-700 dark:text-indigo-300 flex-1">
-                {selectedUids.size} user{selectedUids.size > 1 ? 's' : ''} selected
+                {selectedUids.size} user{selectedUids.size > 1 ? 's' : ''} selected — open Campaign panel →
               </span>
               <button
-                onClick={generateContent}
-                disabled={isGenerating}
-                className="flex items-center gap-1.5 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all disabled:opacity-60 shadow-md shadow-indigo-900/20"
+                onClick={() => setSelectedUids(new Set())}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
               >
-                {isGenerating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-                Generate AI Blog
-              </button>
-              <button onClick={() => setSelectedUids(new Set())} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
                 <X className="w-4 h-4" />
               </button>
             </motion.div>
           )}
 
-          {/* Table */}
+          {/* User Table */}
           <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
-            {/* Table header */}
             <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
               <button onClick={toggleAll} className="text-slate-400 hover:text-indigo-600 transition-colors shrink-0">
                 {selectedUids.size === filteredUsers.length && filteredUsers.length > 0
                   ? <CheckSquare className="w-4 h-4 text-indigo-600" />
-                  : <Square className="w-4 h-4" />
-                }
+                  : <Square className="w-4 h-4" />}
               </button>
               <span className="text-xs font-bold text-slate-500 uppercase tracking-wider flex-1">
                 User ({filteredUsers.length})
               </span>
               <span className="text-xs font-bold text-slate-500 uppercase tracking-wider hidden md:block w-24 text-center">Joined</span>
               <span className="text-xs font-bold text-slate-500 uppercase tracking-wider w-20 text-center">FCM</span>
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider w-16 text-center">Action</span>
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider w-16 text-center">Campaign</span>
             </div>
 
-            {/* Rows */}
             {loadingUsers ? (
               <div className="flex items-center justify-center py-16 gap-2 text-slate-400">
                 <Loader2 className="w-5 h-5 animate-spin" />
@@ -668,21 +966,18 @@ export default function AdminEngagement({ currentUserEmail, onBack }: AdminEngag
                         'flex items-center gap-3 px-4 py-3 transition-colors',
                         isSelected || isTarget
                           ? 'bg-indigo-50/60 dark:bg-indigo-900/20'
-                          : 'hover:bg-slate-50 dark:hover:bg-slate-700/40'
+                          : 'hover:bg-slate-50 dark:hover:bg-slate-700/40',
                       )}
                     >
-                      {/* Checkbox */}
                       <button
                         onClick={() => toggleSelect(user.uid)}
                         className="text-slate-400 hover:text-indigo-600 transition-colors shrink-0"
                       >
                         {isSelected
                           ? <CheckSquare className="w-4 h-4 text-indigo-600" />
-                          : <Square className="w-4 h-4" />
-                        }
+                          : <Square className="w-4 h-4" />}
                       </button>
 
-                      {/* User info */}
                       <div className="flex items-center gap-2.5 flex-1 min-w-0">
                         <Avatar user={user} />
                         <div className="min-w-0">
@@ -694,7 +989,7 @@ export default function AdminEngagement({ currentUserEmail, onBack }: AdminEngag
                               <Mail className="w-2.5 h-2.5 shrink-0" />{user.email}
                             </span>
                             <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 flex items-center gap-1 shrink-0">
-                              <Briefcase className="w-2.5 h-2.5" />{professionLabel(user.profession)}
+                              <Briefcase className="w-2.5 h-2.5" />{getProfessionLabel(user.profession)}
                             </span>
                           </div>
                           {user.phone && (
@@ -705,12 +1000,10 @@ export default function AdminEngagement({ currentUserEmail, onBack }: AdminEngag
                         </div>
                       </div>
 
-                      {/* Joined */}
                       <span className="text-[11px] text-slate-400 hidden md:block w-24 text-center shrink-0">
                         {formatRelative(user.createdAt)}
                       </span>
 
-                      {/* FCM token indicator */}
                       <div className="w-20 flex justify-center shrink-0">
                         {user.fcmToken ? (
                           <span className="flex items-center gap-1 px-2 py-0.5 bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-700 rounded-full text-[10px] font-bold text-emerald-600 dark:text-emerald-300">
@@ -723,16 +1016,15 @@ export default function AdminEngagement({ currentUserEmail, onBack }: AdminEngag
                         )}
                       </div>
 
-                      {/* Single target button */}
                       <div className="w-16 flex justify-center shrink-0">
                         <button
                           onClick={() => targetSingle(user.uid)}
-                          title="Target this user"
+                          title="Open Campaign Panel"
                           className={cn(
                             'p-1.5 rounded-xl border transition-all',
                             isTarget
                               ? 'bg-indigo-600 border-indigo-600 text-white'
-                              : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-indigo-400 hover:text-indigo-600'
+                              : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-indigo-400 hover:text-indigo-600',
                           )}
                         >
                           <Target className="w-3.5 h-3.5" />
@@ -747,11 +1039,10 @@ export default function AdminEngagement({ currentUserEmail, onBack }: AdminEngag
         </div>
       </div>
 
-      {/* ── Campaign Modal Overlay ── */}
+      {/* ── Campaign Modal ── */}
       <AnimatePresence>
         {isPanelOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -760,137 +1051,95 @@ export default function AdminEngagement({ currentUserEmail, onBack }: AdminEngag
               className="absolute inset-0 bg-slate-900/70 backdrop-blur-md"
             />
 
-            {/* Glassmorphism modal */}
             <motion.div
               key="campaign-modal"
               initial={{ opacity: 0, scale: 0.93, y: 28 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.93, y: 28 }}
               transition={{ type: 'spring', stiffness: 280, damping: 26 }}
-              className="relative w-full max-w-2xl max-h-[92vh] flex flex-col rounded-[2rem] bg-white/90 dark:bg-slate-800/90 backdrop-blur-xl shadow-2xl ring-1 ring-white/25 dark:ring-white/10 overflow-hidden"
+              className="relative w-full max-w-2xl max-h-[92vh] flex flex-col rounded-[2rem] bg-white dark:bg-slate-800 shadow-2xl ring-1 ring-slate-200/80 dark:ring-slate-700/80 overflow-hidden"
             >
-              {/* Modal header */}
+              {/* Header */}
               <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-200/60 dark:border-slate-700/60 bg-gradient-to-r from-indigo-600 to-purple-600 text-white shrink-0">
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/20">
-                  <Sparkles className="w-5 h-5" />
+                  <Megaphone className="w-5 h-5" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-bold uppercase tracking-wider text-white/70">AI Campaign Generator</p>
+                  <p className="text-xs font-bold uppercase tracking-wider text-white/70">Campaign Manager</p>
                   <p className="text-sm font-semibold truncate mt-0.5">
                     {targetUsers.length === 1
                       ? targetUsers[0].displayName
                       : `${targetUsers.length} users selected`}
                   </p>
                 </div>
-                <button
-                  onClick={closePanel}
-                  className="p-2 rounded-xl hover:bg-white/15 transition-all shrink-0"
-                >
+                <button onClick={closePanel} className="p-2 rounded-xl hover:bg-white/15 transition-all shrink-0">
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              {/* Modal body */}
+              {/* Body */}
               <div className="flex-1 overflow-y-auto p-5 space-y-4">
                 {/* Target user chips */}
-                {targetUsers.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {targetUsers.slice(0, 6).map((u) => (
-                      <div key={u.uid} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium">
-                        <Avatar user={u} />
-                        <span className="truncate max-w-[100px]">{u.displayName}</span>
-                        <span className="text-slate-400 shrink-0">({professionLabel(u.profession)})</span>
-                      </div>
-                    ))}
-                    {targetUsers.length > 6 && (
-                      <div className="px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-400 text-xs">
-                        +{targetUsers.length - 6} more
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Generate button */}
-                {!generatedContent && !isGenerating && !genError && (
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.97 }}
-                    onClick={generateContent}
-                    className="w-full py-5 px-6 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold flex items-center justify-center gap-2.5 shadow-lg shadow-indigo-900/20 transition-all"
-                  >
-                    <Sparkles className="w-5 h-5" />
-                    Generate AI Blog Content
-                  </motion.button>
-                )}
-
-                {/* Generating state */}
-                {isGenerating && (
-                  <div className="flex flex-col items-center justify-center py-14 gap-4">
-                    <div className="relative">
-                      <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-500 animate-pulse flex items-center justify-center shadow-lg shadow-indigo-500/40">
-                        <Sparkles className="w-10 h-10 text-white" />
-                      </div>
-                      <div className="absolute -inset-1.5 rounded-2xl border-2 border-indigo-500/30 animate-ping" />
+                <div className="flex flex-wrap gap-2">
+                  {targetUsers.slice(0, 6).map((u) => (
+                    <div key={u.uid} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium">
+                      <Avatar user={u} />
+                      <span className="truncate max-w-[100px]">{u.displayName}</span>
+                      <span className="text-slate-400 shrink-0">({getProfessionLabel(u.profession)})</span>
                     </div>
-                    <div className="text-center">
-                      <p className="font-bold text-slate-700 dark:text-slate-200">Gemini AI is crafting the campaign…</p>
-                      <p className="text-sm text-slate-400 mt-1">Personalising content for {targetUsers[0]?.displayName ?? 'user'}</p>
+                  ))}
+                  {targetUsers.length > 6 && (
+                    <div className="px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-400 text-xs">
+                      +{targetUsers.length - 6} more
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
 
-                {/* Error state */}
-                {genError && !isGenerating && (
-                  <div className="p-4 rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700">
-                    <p className="text-sm font-bold text-red-600 dark:text-red-400 mb-1">Generation Failed</p>
-                    <p className="text-xs text-red-500 dark:text-red-300 leading-relaxed">{genError}</p>
-                    <button
-                      onClick={generateContent}
-                      className="mt-3 flex items-center gap-1.5 px-3 py-1.5 bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 text-xs font-bold rounded-xl transition-all"
-                    >
-                      <RefreshCw className="w-3 h-3" /> Retry
-                    </button>
-                  </div>
-                )}
-
-                {/* Editable content preview */}
-                {generatedContent && !isGenerating && (
-                  <ContentPanel
-                    content={generatedContent}
-                    targetUsers={targetUsers}
-                    blogId={generatedBlogId}
-                    onSendPreview={(edited) => sendPreview(edited)}
-                    onSendToUsers={(edited) => sendToUsers(edited)}
-                    onRegenerate={generateContent}
-                    sending={isSending}
-                  />
-                )}
-
-                {/* Send result */}
-                {sendResult && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className={cn(
-                      'p-4 rounded-2xl border text-sm leading-relaxed whitespace-pre-line',
-                      sendResult.startsWith('✅')
-                        ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300'
-                        : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700 text-red-700 dark:text-red-300'
+                {/* Show success OR form */}
+                {sendResult && sendResult.startsWith('SUCCESS:') ? (() => {
+                  const [, blogId, batchId, countStr] = sendResult.split(':');
+                  return (
+                    <CampaignSuccessCard
+                      blogId={blogId}
+                      batchId={batchId}
+                      userCount={Number(countStr)}
+                      onDismiss={() => setSendResult(null)}
+                    />
+                  );
+                })() : (
+                  <>
+                    {sendResult && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="p-3.5 rounded-2xl border bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700 text-sm text-red-700 dark:text-red-300 flex items-start gap-2"
+                      >
+                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                        <span>{sendResult}</span>
+                      </motion.div>
                     )}
-                  >
-                    {sendResult}
-                  </motion.div>
+
+                    <ManualCampaignForm
+                      savedBlogs={savedBlogs}
+                      targetUsers={targetUsers}
+                      onSend={sendManualCampaign}
+                      sending={isSending}
+                      uploadProgress={uploadProgress}
+                    />
+                  </>
                 )}
               </div>
 
-              {/* Modal footer — Cloud Function note */}
+              {/* Footer */}
               <div className="shrink-0 border-t border-slate-200/60 dark:border-slate-700/60 px-5 py-3 bg-amber-50/80 dark:bg-amber-900/10 flex items-start gap-2.5">
                 <BellRing className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
                 <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-relaxed">
                   <strong>Cloud Function required</strong> — Deploy{' '}
                   <code className="font-mono bg-amber-100 dark:bg-amber-900/40 px-1 rounded">processNotificationQueue</code>{' '}
-                  to auto-dispatch FCM push notifications from the queue. Each entry now stores{' '}
-                  <code className="font-mono bg-amber-100 dark:bg-amber-900/40 px-1 rounded">targetUserId</code> for granular processing.
+                  to dispatch FCM push notifications. Each queued doc stores{' '}
+                  <code className="font-mono bg-amber-100 dark:bg-amber-900/40 px-1 rounded">userId</code>,{' '}
+                  <code className="font-mono bg-amber-100 dark:bg-amber-900/40 px-1 rounded">blogId</code>, and{' '}
+                  <code className="font-mono bg-amber-100 dark:bg-amber-900/40 px-1 rounded">clickAction</code>.
                 </p>
               </div>
             </motion.div>

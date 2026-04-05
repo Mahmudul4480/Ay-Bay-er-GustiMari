@@ -18,11 +18,15 @@ const ProfessionSelector: React.FC = () => {
   const [customProfession, setCustomProfession] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const customInputRef = useRef<HTMLInputElement>(null);
+  const customBoxRef = useRef<HTMLDivElement>(null);
 
-  // Auto-focus the text input when 'other' is selected
+  // Auto-focus the text input and scroll it into view when 'other' is selected
   useEffect(() => {
     if (selected === 'other') {
-      setTimeout(() => customInputRef.current?.focus(), 200);
+      setTimeout(() => {
+        customInputRef.current?.focus();
+        customBoxRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 150);
     }
   }, [selected]);
 
@@ -174,45 +178,50 @@ const ProfessionSelector: React.FC = () => {
         <AnimatePresence>
           {selected === 'other' && (
             <motion.div
-              initial={{ opacity: 0, height: 0, y: -8 }}
-              animate={{ opacity: 1, height: 'auto', y: 0 }}
-              exit={{ opacity: 0, height: 0, y: -8 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 28 }}
-              className="overflow-hidden"
+              key="custom-profession-box"
+              ref={customBoxRef}
+              initial={{ opacity: 0, y: 10, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 6, scale: 0.98 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+              className="mt-6 mx-auto max-w-md"
             >
-              <div className="mt-6 mx-auto max-w-md">
-                <div className="rounded-2xl border-2 border-slate-200 bg-white p-4 shadow-sm dark:border-slate-600 dark:bg-slate-800">
-                  <label
-                    htmlFor="custom-profession"
-                    className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-700 dark:text-slate-200"
-                  >
-                    <PencilLine className="h-4 w-4 text-slate-500" />
-                    আপনার পেশাটি লিখুন (যেমন: সাংবাদিক, শিল্পী)
-                  </label>
-                  <input
-                    ref={customInputRef}
-                    id="custom-profession"
-                    type="text"
-                    value={customProfession}
-                    onChange={(e) => setCustomProfession(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && canContinue) void handleContinue(); }}
-                    placeholder="e.g., Journalist, Artist, Nurse…"
-                    maxLength={60}
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:placeholder-slate-500"
-                  />
+              <div className="rounded-2xl border-2 border-blue-300 bg-white p-5 shadow-lg shadow-blue-100/60 dark:border-blue-600 dark:bg-slate-800 dark:shadow-none">
+                <label
+                  htmlFor="custom-profession"
+                  className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-700 dark:text-slate-200"
+                >
+                  <PencilLine className="h-4 w-4 text-blue-500" />
+                  আপনার পেশাটি লিখুন
+                  <span className="ml-auto text-xs font-normal text-slate-400">(যেমন: নার্স, সাংবাদিক, শিল্পী)</span>
+                </label>
+                <input
+                  ref={customInputRef}
+                  id="custom-profession"
+                  type="text"
+                  value={customProfession}
+                  onChange={(e) => setCustomProfession(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && canContinue) void handleContinue(); }}
+                  placeholder="e.g. Nurse, Journalist, Pilot…"
+                  maxLength={60}
+                  className="w-full rounded-xl border-2 border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/25 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:placeholder-slate-500 dark:focus:border-blue-400 dark:focus:bg-slate-800"
+                />
+                <AnimatePresence>
                   {customProfession.trim().length > 0 && (
                     <motion.p
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="mt-2 text-xs text-slate-500 dark:text-slate-400"
+                      key="preview"
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0 }}
+                      className="mt-2.5 flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400"
                     >
-                      Saved as:{' '}
-                      <span className="font-bold text-blue-600 dark:text-blue-400">
+                      সংরক্ষিত হবে:{' '}
+                      <span className="rounded-full bg-blue-100 px-2 py-0.5 font-bold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
                         {customProfession.trim()}
                       </span>
                     </motion.p>
                   )}
-                </div>
+                </AnimatePresence>
               </div>
             </motion.div>
           )}

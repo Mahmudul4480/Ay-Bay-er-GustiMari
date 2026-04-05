@@ -965,7 +965,7 @@ const SettingsPage: React.FC = () => {
                 {t('incomeCategories')}
               </h4>
               <div className="flex flex-wrap gap-2">
-                {userProfile?.incomeCategories?.map((cat: string) => (
+                {userProfile?.incomeCategories?.filter((cat: string) => cat !== 'Other' && cat !== 'Other Income').map((cat: string) => (
                   <div key={cat} className="flex items-center gap-2 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-4 py-2 rounded-xl font-medium">
                     {editingCategory?.type === 'income' && editingCategory?.oldName === cat ? (
                       <input
@@ -1030,7 +1030,7 @@ const SettingsPage: React.FC = () => {
                 {t('expenseCategories')}
               </h4>
               <div className="flex flex-wrap gap-2">
-                {userProfile?.expenseCategories?.map((cat: string) => (
+                {userProfile?.expenseCategories?.filter((cat: string) => cat !== 'Other' && cat !== 'Other Income').map((cat: string) => (
                   <div key={cat} className="flex items-center gap-2 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 px-4 py-2 rounded-xl font-medium">
                     {editingCategory?.type === 'expense' && editingCategory?.oldName === cat ? (
                       <input
@@ -1245,7 +1245,7 @@ const SettingsPage: React.FC = () => {
                   {(fixedForm.type === 'income' 
                     ? (userProfile?.incomeCategories || []) 
                     : (userProfile?.expenseCategories || [])
-                  ).map((c: string) => (
+                  ).filter((c: string) => c !== 'Other' && c !== 'Other Income').map((c: string) => (
                     <option key={c} value={c}>{c}</option>
                   ))}
                 </select>

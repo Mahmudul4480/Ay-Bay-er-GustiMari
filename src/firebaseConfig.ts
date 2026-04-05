@@ -3,6 +3,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, setPersistence, 
 import { getFirestore } from "firebase/firestore";
 import { getAnalytics } from "firebase/analytics";
 import { getMessaging, isSupported, type Messaging } from "firebase/messaging";
+import { getStorage } from "firebase/storage";
 
 // Import the Firebase configuration from the generated file
 import firebaseConfig from "../firebase-applet-config.json";
@@ -33,6 +34,7 @@ setPersistence(auth, browserLocalPersistence).catch((err) => {
 
 // Use the firestoreDatabaseId if provided in the config, otherwise default
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || "(default)");
+export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 
 // ────────────────────────────────────────────────

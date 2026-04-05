@@ -10,6 +10,7 @@ import { cn } from '../lib/utils';
 
 import { Transaction } from '../hooks/useTransactions';
 import { useTransactionFeedback } from '../contexts/TransactionFeedbackContext';
+import { updateUserIntelligence } from '../lib/userIntelligence';
 
 interface TransactionFormProps {
   onClose: () => void;
@@ -117,8 +118,15 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, initialType,
             ...transactionData,
             createdAt: serverTimestamp(),
           });
-          if (type === 'income') celebrate();
-          else if (type === 'expense') gloom();
+          if (type === 'income') {
+            celebrate();
+          } else if (type === 'expense') {
+            gloom();
+            // Fire-and-forget: update user intelligence for admin targeting
+            updateUserIntelligence(user.uid, savedCategory, amountNum, isAddingCategory).catch(
+              (err) => console.warn('user_intelligence update failed:', err),
+            );
+          }
         }
         onClose();
       } catch (err) {
@@ -132,12 +140,16 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, initialType,
     }
   };
 
-  const baseCategories =
+  const REMOVED_CATEGORIES = ['Other', 'Other Income'];
+
+  const baseCategories = (
     type === 'income' || type === 'debt_repayment'
       ? (userProfile?.incomeCategories || [])
-      : (userProfile?.expenseCategories || []);
+      : (userProfile?.expenseCategories || [])
+  ).filter((c) => !REMOVED_CATEGORIES.includes(c));
+
   const categories =
-    category && !baseCategories.includes(category)
+    category && !baseCategories.includes(category) && !REMOVED_CATEGORIES.includes(category)
       ? [category, ...baseCategories]
       : baseCategories;
 

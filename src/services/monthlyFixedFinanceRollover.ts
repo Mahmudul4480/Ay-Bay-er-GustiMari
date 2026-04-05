@@ -46,7 +46,7 @@ export async function applyMonthlyFixedFinanceRollover(
       userId,
       amount: Number(f.amount) || 0,
       type: t,
-      category: f.category || 'Other',
+      category: f.category || 'General',
       date: Timestamp.fromDate(scheduled),
       note: f.description ? `Fixed: ${f.description}` : 'Fixed finance (monthly)',
       familyMember: 'Self',

@@ -6,12 +6,14 @@ import { db } from '../firebaseConfig';
 
 interface BlogDoc {
   title: string;
-  notificationMessage: string;
+  notificationMessage?: string;
   blogContent: string;
-  imagePrompt: string;
-  ctaText: string;
-  targetUserName: string;
-  targetProfession: string;
+  imagePrompt?: string;
+  ctaText?: string;
+  targetUserName?: string;
+  targetProfession?: string;
+  category?: string;
+  type?: 'manual' | 'ai';
   createdAt: Timestamp | null;
 }
 
@@ -142,33 +144,48 @@ export default function BlogPage({ blogId, onBack }: BlogPageProps) {
           transition={{ duration: 0.5 }}
           className="bg-white/10 backdrop-blur-2xl border border-white/20 rounded-3xl overflow-hidden shadow-2xl"
         >
-          {/* Cover image */}
-          <div className="relative w-full h-52 sm:h-64 overflow-hidden">
-            <img
-              src={imageUrl(blogId)}
-              alt={blog.imagePrompt}
-              className="w-full h-full object-cover"
-              loading="eager"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
-            {/* Prompt badge */}
-            <div className="absolute bottom-3 left-3 right-3">
-              <p className="text-white/60 text-[10px] leading-tight line-clamp-2 italic">
-                🎨 {blog.imagePrompt}
-              </p>
+          {/* Cover image — only shown for AI blogs or when imagePrompt exists */}
+          {blog.imagePrompt ? (
+            <div className="relative w-full h-52 sm:h-64 overflow-hidden">
+              <img
+                src={imageUrl(blogId)}
+                alt={blog.imagePrompt}
+                className="w-full h-full object-cover"
+                loading="eager"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+              <div className="absolute bottom-3 left-3 right-3">
+                <p className="text-white/60 text-[10px] leading-tight line-clamp-2 italic">
+                  🎨 {blog.imagePrompt}
+                </p>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="w-full h-28 sm:h-36 bg-gradient-to-br from-white/10 to-white/5 flex items-center justify-center">
+              <img
+                src="https://i.postimg.cc/K8yGqVdy/logo-png.png"
+                alt="Ay Bay Er GustiMari"
+                className="h-16 w-auto object-contain opacity-60"
+              />
+            </div>
+          )}
 
           <div className="p-6 sm:p-8 space-y-6">
             {/* Meta */}
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="flex items-center gap-1.5 px-3 py-1 bg-white/15 border border-white/20 rounded-full text-white/80 text-xs font-medium">
-                <BookOpen className="w-3 h-3" />
-                {blog.targetProfession}
-              </span>
-              <span className="flex items-center gap-1.5 px-3 py-1 bg-amber-400/20 border border-amber-400/30 rounded-full text-amber-200 text-xs font-medium">
+              {(blog.category || blog.targetProfession) && (
+                <span className="flex items-center gap-1.5 px-3 py-1 bg-white/15 border border-white/20 rounded-full text-white/80 text-xs font-medium">
+                  <BookOpen className="w-3 h-3" />
+                  {blog.category || blog.targetProfession}
+                </span>
+              )}
+              <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${
+                blog.type === 'manual'
+                  ? 'bg-emerald-400/20 border-emerald-400/30 text-emerald-200'
+                  : 'bg-amber-400/20 border-amber-400/30 text-amber-200'
+              }`}>
                 <Sparkles className="w-3 h-3" />
-                AI Generated
+                {blog.type === 'manual' ? 'Editorial' : 'AI Generated'}
               </span>
               {blog.createdAt && (
                 <span className="text-white/40 text-xs ml-auto">
@@ -199,9 +216,9 @@ export default function BlogPage({ blogId, onBack }: BlogPageProps) {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.97 }}
               onClick={handleCta}
-              className="w-full py-4 px-6 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white font-bold text-lg rounded-2xl shadow-lg shadow-indigo-900/40 transition-all border border-white/20"
+              className="w-full py-5 px-6 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white font-bold text-base sm:text-lg rounded-2xl shadow-xl shadow-indigo-900/40 transition-all border border-white/20 leading-snug"
             >
-              {blog.ctaText || 'হিসাব দেখতে এখানে ক্লিক করুন'}
+              {blog.ctaText || 'আপনার আজকের হিসাবটি লিখুন — Ay Bay Er GustiMari-তে যান'}
             </motion.button>
 
             {/* Footer note */}

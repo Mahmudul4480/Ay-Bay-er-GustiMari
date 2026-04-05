@@ -202,3 +202,53 @@
 #root.tx-gloom-shake {
   animation: tx-gloom-shake 0.55s ease-in-out 2;
 }
+
+/* ── Smart Tips / Blog neon pulse ─────────────────────────────────────────── */
+@keyframes neon-breathe {
+  0%, 100% {
+    box-shadow:
+      0 0 8px  rgba(168, 85, 247, 0.45),
+      0 0 20px rgba(168, 85, 247, 0.22),
+      0 0 40px rgba(168, 85, 247, 0.10);
+  }
+  50% {
+    box-shadow:
+      0 0 18px rgba(168, 85, 247, 0.80),
+      0 0 38px rgba(168, 85, 247, 0.45),
+      0 0 68px rgba(168, 85, 247, 0.22),
+      inset 0 0 18px rgba(168, 85, 247, 0.08);
+  }
+}
+
+@keyframes neon-breathe-cyan {
+  0%, 100% {
+    box-shadow:
+      0 0 8px  rgba(6, 182, 212, 0.45),
+      0 0 20px rgba(6, 182, 212, 0.22),
+      0 0 40px rgba(6, 182, 212, 0.10);
+  }
+  50% {
+    box-shadow:
+      0 0 18px rgba(6, 182, 212, 0.80),
+      0 0 38px rgba(6, 182, 212, 0.45),
+      0 0 68px rgba(6, 182, 212, 0.22),
+      inset 0 0 18px rgba(6, 182, 212, 0.08);
+  }
+}
+
+/* Applied to the sidebar Smart Tips button */
+.smart-tips-sidebar-btn {
+  animation: neon-breathe 2.4s ease-in-out infinite;
+}
+
+/* Applied to the dashboard banner */
+.smart-tips-banner {
+  animation: neon-breathe 2.8s ease-in-out infinite;
+}
+
+/* Neon glow text for Smart Tips headings */
+.neon-text-purple {
+  text-shadow:
+    0 0 8px  rgba(168, 85, 247, 0.70),
+    0 0 20px rgba(168, 85, 247, 0.40);
+}

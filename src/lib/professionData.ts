@@ -10,6 +10,7 @@ import {
   BookOpen,
   Home,
   Building2,
+  Globe,
   Users,
 } from 'lucide-react';
 
@@ -18,6 +19,7 @@ export type ProfessionId =
   | 'lawyer'
   | 'tax_lawyer'
   | 'businessman'
+  | 'mnc_employee'
   | 'doctor'
   | 'teacher'
   | 'freelancer_it'
@@ -74,6 +76,15 @@ export const PROFESSIONS: ProfessionDefinition[] = [
     cardClass:
       'border-violet-200/90 bg-gradient-to-br from-violet-50 via-white to-fuchsia-50/70 dark:border-violet-800/50 dark:from-violet-950/40 dark:via-slate-900 dark:to-slate-900',
     iconWrapClass: 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300',
+  },
+  {
+    id: 'mnc_employee',
+    label: 'MNC',
+    sublabel: 'বহুজাতিক কর্মী',
+    icon: Globe,
+    cardClass:
+      'border-teal-200/90 bg-gradient-to-br from-teal-50 via-white to-cyan-50/60 dark:border-teal-800/50 dark:from-teal-950/35 dark:via-slate-900 dark:to-slate-900',
+    iconWrapClass: 'bg-teal-100 text-teal-800 dark:bg-teal-900/50 dark:text-teal-200',
   },
   {
     id: 'doctor',
@@ -157,6 +168,7 @@ export const UNIVERSAL_EXPENSE_CATEGORIES: string[] = [
   'Utilities',
   'Mobile/Internet',
   'Transport',
+  'Travel',
 ];
 
 /** Universal income categories merged with profession-specific income lists. */
@@ -166,7 +178,6 @@ export const UNIVERSAL_INCOME_CATEGORIES: string[] = [
   'Business',
   'Investment',
   'Gift',
-  'Other',
 ];
 
 export function mergeUniqueCategoryLists(lists: string[][]): string[] {
@@ -216,6 +227,10 @@ const DEFAULT_BY_PROFESSION: Record<ProfessionId, { income: string[]; expense: s
     income: ['Business', 'Sales', 'Partnership', 'Investment'],
     expense: ['Inventory', 'Rent', 'Marketing', 'Salaries', 'Utilities'],
   },
+  mnc_employee: {
+    income: ['Salary', 'Bonus', 'Performance Pay', 'Stock Options', 'Allowance'],
+    expense: ['Rent', 'Transport', 'Team Lunch', 'Professional Development', 'Subscriptions', 'Healthcare', 'Tech Equipment'],
+  },
   doctor: {
     income: ['Salary', 'Consultation', 'Surgery'],
     expense: ['Clinic Rent', 'Medical Supplies', 'Equipment', 'Staff', 'Utilities'],
@@ -242,8 +257,8 @@ const DEFAULT_BY_PROFESSION: Record<ProfessionId, { income: string[]; expense: s
   },
   // 'other' gets only universal + generic personal categories — no profession-specific lists
   other: {
-    income: ['Salary', 'Business', 'Part-time', 'Gift', 'Other Income'],
-    expense: ['Rent', 'Groceries', 'Household', 'Bills', 'Education', 'Health', 'Other'],
+    income: ['Salary', 'Business', 'Part-time', 'Gift'],
+    expense: ['Rent', 'Groceries', 'Household', 'Bills', 'Education', 'Health', 'Travel'],
   },
 };
 
@@ -276,10 +291,10 @@ export function buildMergedCategoriesForProfession(
 /** Categories for brand-new Firestore profiles (before profession is chosen). */
 export function getDefaultCategoriesForNewUser(): { income: string[]; expense: string[] } {
   return {
-    income: mergeUniqueCategoryLists([UNIVERSAL_INCOME_CATEGORIES, ['Salary', 'Business', 'Gift', 'Investment', 'Other']]),
+    income: mergeUniqueCategoryLists([UNIVERSAL_INCOME_CATEGORIES, ['Salary', 'Business', 'Gift', 'Investment']]),
     expense: mergeUniqueCategoryLists([
       UNIVERSAL_EXPENSE_CATEGORIES,
-      ['Food', 'Rent', 'Utilities', 'Transport', 'Entertainment', 'Health', 'Education', 'Shopping', 'Other'],
+      ['Food', 'Rent', 'Utilities', 'Transport', 'Entertainment', 'Health', 'Education', 'Shopping', 'Travel'],
     ]),
   };
 }
@@ -293,6 +308,7 @@ export const WELCOME_CHARACTER_URLS: Record<ProfessionId, string> = {
   lawyer: 'https://api.dicebear.com/9.x/avataaars/svg?seed=LawyerSara&mouth%5B%5D=smile&facialHairProbability=0&top%5B%5D=longHairCurly&backgroundColor=transparent',
   tax_lawyer: 'https://api.dicebear.com/9.x/avataaars/svg?seed=TaxLawyerNia&mouth%5B%5D=smile&facialHairProbability=0&top%5B%5D=longHairBun&backgroundColor=transparent',
   businessman: 'https://api.dicebear.com/9.x/avataaars/svg?seed=BizLeela&mouth%5B%5D=smile&facialHairProbability=0&top%5B%5D=longHairStraight2&backgroundColor=transparent',
+  mnc_employee: 'https://api.dicebear.com/9.x/avataaars/svg?seed=MNCRiya&mouth%5B%5D=smile&facialHairProbability=0&top%5B%5D=longHairBun&accessories%5B%5D=wayfarers&backgroundColor=transparent',
   doctor: 'https://api.dicebear.com/9.x/avataaars/svg?seed=DoctorAnika&mouth%5B%5D=smile&facialHairProbability=0&top%5B%5D=longHairStraight&accessories%5B%5D=prescription01&backgroundColor=transparent',
   teacher: 'https://api.dicebear.com/9.x/avataaars/svg?seed=TeacherRina&mouth%5B%5D=smile&facialHairProbability=0&top%5B%5D=longHairBigHair&backgroundColor=transparent',
   freelancer_it: 'https://api.dicebear.com/9.x/avataaars/svg?seed=DevPriya&mouth%5B%5D=smile&facialHairProbability=0&top%5B%5D=longHairShavedSides&backgroundColor=transparent',

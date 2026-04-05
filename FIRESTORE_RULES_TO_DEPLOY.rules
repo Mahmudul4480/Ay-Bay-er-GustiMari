@@ -150,5 +150,14 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // -------------------------------------------------------------------------
+    // User Intelligence — user writes own doc; admin reads all
+    // Client writes via setDoc({merge:true}) on every expense transaction.
+    // -------------------------------------------------------------------------
+    match /user_intelligence/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId);
+    }
+
   }
 }

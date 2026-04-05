@@ -5,8 +5,6 @@ import {
   onSnapshot,
   addDoc,
   serverTimestamp,
-  doc,
-  updateDoc,
 } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { useCurrentMonthKey } from '../hooks/useCurrentMonthKey';
@@ -38,16 +36,11 @@ import {
   Loader2,
   CheckSquare,
   Square,
-  BellRing,
   FileText,
   Copy,
   CheckCheck,
-  RefreshCw,
   Send,
-  Eye,
-  MessageSquare,
-  Image as ImageIcon,
-  Pencil,
+  AlertCircle,
 } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { useLocalization } from '../contexts/LocalizationContext';
@@ -67,11 +60,7 @@ import {
 } from 'recharts';
 import type { PieSectorDataItem } from 'recharts';
 import { format } from 'date-fns';
-import { generateBlogContent, type GeneratedBlogContent } from '../lib/geminiApi';
-import {
-  sendBrowserPreviewNotification,
-  queueNotificationsForUsers,
-} from '../lib/fcmUtils';
+import { queueNotificationsForUsers } from '../lib/fcmUtils';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const ADMIN_EMAIL = 'chotan4480@gmail.com';
@@ -151,7 +140,7 @@ interface CategoryUser {
   categoryAmount: number;
 }
 
-type CampaignStep = 'select' | 'generating' | 'preview';
+type CampaignStep = 'select' | 'compose' | 'sent';
 
 interface CategoryUsersModalProps {
   category: string;
@@ -166,29 +155,26 @@ const CategoryUsersModal: React.FC<CategoryUsersModalProps> = ({
 }) => {
   const [selectedUids, setSelectedUids] = useState<Set<string>>(new Set());
   const [step, setStep] = useState<CampaignStep>('select');
-  const [content, setContent] = useState<GeneratedBlogContent | null>(null);
-  // editedContent tracks live edits in the preview; initialised from AI output
-  const [editedContent, setEditedContent] = useState<GeneratedBlogContent | null>(null);
   const [blogId, setBlogId] = useState<string | null>(null);
-  const [genError, setGenError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
-  const [sendResult, setSendResult] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // Mirror freshly-generated content into the editable state
-  useEffect(() => {
-    if (content) setEditedContent({ ...content });
-  }, [content]);
+  // Compose form
+  const [notifTitle, setNotifTitle] = useState('');
+  const [notifMessage, setNotifMessage] = useState('');
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   const selectedUsers = users.filter((u) => selectedUids.has(u.id));
   const allSelected = users.length > 0 && selectedUids.size === users.length;
 
   const resetToSelect = () => {
     setStep('select');
-    setContent(null);
-    setEditedContent(null);
     setBlogId(null);
-    setSendResult(null);
+    setSendError(null);
+    setNotifTitle('');
+    setNotifMessage('');
+    setFormErrors({});
   };
 
   const toggleAll = () => {
@@ -204,79 +190,44 @@ const CategoryUsersModal: React.FC<CategoryUsersModalProps> = ({
     });
   };
 
-  const handleGenerate = async () => {
+  const handleCompose = () => {
     if (selectedUids.size === 0) return;
-    setStep('generating');
-    setGenError(null);
-
-    const firstUser = selectedUsers[0];
-    try {
-      const gen = await generateBlogContent(
-        firstUser?.displayName || 'User',
-        firstUser?.profession || 'other',
-        category
-      );
-
-      // Save a draft blog so we have a shareable link to show in preview
-      const ref = await addDoc(collection(db, 'blogs'), {
-        ...gen,
-        targetUserIds: [...selectedUids],
-        targetCategory: category,
-        categoryType: type,
-        targetUserName: firstUser?.displayName || 'User',
-        targetProfession: firstUser?.profession || 'other',
-        createdAt: serverTimestamp(),
-        status: 'draft',
-      });
-
-      setContent(gen);
-      setBlogId(ref.id);
-      setStep('preview');
-    } catch (e: any) {
-      setGenError(String(e?.message ?? e));
-      setStep('select');
-    }
+    setStep('compose');
   };
 
-  const handleSendPreview = async () => {
-    if (!editedContent) return;
-    const ok = await sendBrowserPreviewNotification(
-      editedContent.title,
-      editedContent.notificationMessage,
-      `/#/blog/${blogId}`
-    );
-    setSendResult(ok
-      ? '✅ Preview notification sent to your device!'
-      : '❌ Notification blocked — check browser permission settings.'
-    );
-  };
+  const handleSend = async () => {
+    const errs: Record<string, string> = {};
+    if (!notifTitle.trim()) errs.title = 'Notification title is required';
+    if (!notifMessage.trim()) errs.message = 'Notification message is required';
+    if (Object.keys(errs).length > 0) { setFormErrors(errs); return; }
 
-  const handleSendCampaign = async () => {
-    if (!editedContent || !blogId) return;
     setIsSending(true);
+    setSendError(null);
     try {
-      // Persist any manual edits back to the draft blog document
-      await updateDoc(doc(db, 'blogs', blogId), {
-        title: editedContent.title,
-        notificationMessage: editedContent.notificationMessage,
-        blogContent: editedContent.blogContent,
-        imagePrompt: editedContent.imagePrompt,
-        ctaText: editedContent.ctaText,
+      const blogRef = await addDoc(collection(db, 'blogs'), {
+        title: notifTitle.trim(),
+        blogContent: notifMessage.trim(),
+        notificationMessage: notifMessage.trim(),
+        imageUrl: '',
+        type: 'manual',
         status: 'published',
+        category,
+        targetUserIds: [...selectedUids],
+        categoryType: type,
+        createdAt: serverTimestamp(),
       });
+      setBlogId(blogRef.id);
 
-      const queueId = await queueNotificationsForUsers(
-        blogId,
+      await queueNotificationsForUsers(
+        blogRef.id,
         [...selectedUids],
-        editedContent.title,
-        editedContent.notificationMessage
+        notifTitle.trim(),
+        notifMessage.trim(),
       );
-      const firstName = selectedUsers[0]?.displayName || 'User';
-      setSendResult(
-        `✅ Campaign sent to ${selectedUids.size} user${selectedUids.size !== 1 ? 's' : ''}${selectedUids.size === 1 ? ` (${firstName})` : ''}!\n🔗 Blog: #/blog/${blogId}\nBatch ID: ${queueId} (${selectedUids.size} queue entries created)`
-      );
+
+      setStep('sent');
     } catch (e: any) {
-      setSendResult(`❌ Failed: ${String(e?.message ?? e)}`);
+      setSendError(`Failed: ${String(e?.message ?? e)}`);
     } finally {
       setIsSending(false);
     }
@@ -289,25 +240,7 @@ const CategoryUsersModal: React.FC<CategoryUsersModalProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const updateField = (key: keyof GeneratedBlogContent, value: string) => {
-    setEditedContent((prev) => (prev ? { ...prev, [key]: value } : null));
-  };
-
-  // Field definitions for the editable preview
-  const previewFields: {
-    key: keyof GeneratedBlogContent;
-    icon: React.ReactNode;
-    label: string;
-    color: string;
-    multiline: boolean;
-    rows?: number;
-  }[] = [
-    { key: 'title',               icon: <MessageSquare className="w-3.5 h-3.5" />, label: 'Title',                color: 'indigo', multiline: false },
-    { key: 'notificationMessage', icon: <BellRing      className="w-3.5 h-3.5" />, label: 'Notification Message', color: 'amber',  multiline: true,  rows: 3 },
-    { key: 'blogContent',         icon: <FileText      className="w-3.5 h-3.5" />, label: 'Blog Content',         color: 'violet', multiline: true,  rows: 9 },
-    { key: 'imagePrompt',         icon: <ImageIcon     className="w-3.5 h-3.5" />, label: 'Image Prompt (AI)',    color: 'sky',    multiline: true,  rows: 3 },
-    { key: 'ctaText',             icon: <Target        className="w-3.5 h-3.5" />, label: 'CTA Button Text',      color: 'rose',   multiline: false },
-  ];
+  const inputBase = 'w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -318,7 +251,7 @@ const CategoryUsersModal: React.FC<CategoryUsersModalProps> = ({
         className="absolute inset-0 bg-slate-900/75 backdrop-blur-md"
       />
 
-      {/* Modal — glassmorphism */}
+      {/* Modal */}
       <motion.div
         initial={{ opacity: 0, scale: 0.92, y: 24 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -326,7 +259,7 @@ const CategoryUsersModal: React.FC<CategoryUsersModalProps> = ({
         transition={{ type: 'spring', stiffness: 280, damping: 26 }}
         className="relative w-full max-w-2xl max-h-[92vh] flex flex-col rounded-[2rem] bg-white/95 dark:bg-slate-800/95 backdrop-blur-xl shadow-2xl ring-1 ring-white/20 dark:ring-white/10 overflow-hidden"
       >
-        {/* Modal header */}
+        {/* Header */}
         <div className={cn(
           'flex items-center justify-between gap-3 p-5 text-white shrink-0',
           type === 'expense'
@@ -342,12 +275,11 @@ const CategoryUsersModal: React.FC<CategoryUsersModalProps> = ({
               <h3 className="font-black text-lg leading-tight truncate">{category}</h3>
               <p className="text-xs text-white/70 mt-0.5">
                 {users.length} user{users.length !== 1 ? 's' : ''} · {type === 'expense' ? 'Expense' : 'Income'} category
-                {step === 'preview' && <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 bg-white/20 rounded-full text-[10px] font-bold"><Pencil className="w-2.5 h-2.5" /> Editable</span>}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {step === 'preview' && (
+            {step === 'compose' && (
               <button
                 onClick={resetToSelect}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-white/15 hover:bg-white/25 rounded-xl text-xs font-bold transition-all"
@@ -367,14 +299,6 @@ const CategoryUsersModal: React.FC<CategoryUsersModalProps> = ({
           {/* ── Step: select ── */}
           {step === 'select' && (
             <>
-              {genError && (
-                <div className="mx-5 mt-4 p-3 rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700">
-                  <p className="text-sm font-bold text-red-600 dark:text-red-400 mb-0.5">Generation Failed</p>
-                  <p className="text-xs text-red-500 dark:text-red-300">{genError}</p>
-                </div>
-              )}
-
-              {/* Select all header */}
               <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-100 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/40">
                 <button onClick={toggleAll} className="text-slate-400 hover:text-indigo-600 transition-colors">
                   {allSelected
@@ -440,103 +364,116 @@ const CategoryUsersModal: React.FC<CategoryUsersModalProps> = ({
             </>
           )}
 
-          {/* ── Step: generating ── */}
-          {step === 'generating' && (
-            <div className="flex flex-col items-center justify-center py-16 gap-4">
-              <div className="relative">
-                <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-500 animate-pulse flex items-center justify-center shadow-lg shadow-indigo-500/40">
-                  <Sparkles className="w-10 h-10 text-white" />
-                </div>
-                <div className="absolute -inset-1.5 rounded-2xl border-2 border-indigo-500/30 animate-ping" />
+          {/* ── Step: compose ── */}
+          {step === 'compose' && (
+            <div className="p-5 space-y-4">
+              {/* Target summary chips */}
+              <div className="flex flex-wrap gap-2">
+                {selectedUsers.slice(0, 4).map((u) => (
+                  <div key={u.id} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium">
+                    {u.photoURL
+                      ? <img src={u.photoURL} alt="" className="w-5 h-5 rounded-full object-cover" />
+                      : <div className="w-5 h-5 rounded-full bg-gradient-to-br from-indigo-400 to-purple-400 flex items-center justify-center text-white text-[9px] font-bold">{(u.displayName || '?').charAt(0).toUpperCase()}</div>
+                    }
+                    <span className="truncate max-w-[80px]">{u.displayName || 'Unknown'}</span>
+                  </div>
+                ))}
+                {selectedUsers.length > 4 && (
+                  <div className="px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-400 text-xs">
+                    +{selectedUsers.length - 4} more
+                  </div>
+                )}
               </div>
-              <div className="text-center">
-                <p className="font-bold text-slate-700 dark:text-slate-200">Gemini AI is crafting the campaign…</p>
-                <p className="text-sm text-slate-400 mt-1">Targeting "{category}" · {selectedUsers.length} user{selectedUsers.length !== 1 ? 's' : ''}</p>
+
+              {/* Error */}
+              {sendError && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-3 rounded-2xl border bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700 text-sm text-red-700 dark:text-red-300 flex items-start gap-2"
+                >
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{sendError}</span>
+                </motion.div>
+              )}
+
+              {/* Notification Title */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                  Notification Title *
+                </label>
+                <input
+                  type="text"
+                  value={notifTitle}
+                  onChange={(e) => { setNotifTitle(e.target.value); setFormErrors((p) => ({ ...p, title: '' })); }}
+                  placeholder={`e.g. আপনার "${category}" খরচ সম্পর্কে একটি টিপস`}
+                  className={cn(inputBase, formErrors.title && 'border-red-400 ring-1 ring-red-400')}
+                />
+                {formErrors.title && (
+                  <p className="flex items-center gap-1 text-[11px] text-red-500">
+                    <AlertCircle className="w-3 h-3" /> {formErrors.title}
+                  </p>
+                )}
+              </div>
+
+              {/* Notification Message */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                  <span>Message *</span>
+                  <span className="font-normal text-slate-400 normal-case">(max 120 chars)</span>
+                </label>
+                <textarea
+                  value={notifMessage}
+                  onChange={(e) => { setNotifMessage(e.target.value); setFormErrors((p) => ({ ...p, message: '' })); }}
+                  rows={3}
+                  maxLength={120}
+                  placeholder="সংক্ষিপ্ত নোটিফিকেশন বার্তা লিখুন…"
+                  className={cn(inputBase, 'resize-none', formErrors.message && 'border-red-400 ring-1 ring-red-400')}
+                />
+                <div className="flex items-center justify-between">
+                  {formErrors.message
+                    ? <p className="flex items-center gap-1 text-[11px] text-red-500"><AlertCircle className="w-3 h-3" />{formErrors.message}</p>
+                    : <span />}
+                  <span className="text-[10px] text-slate-400">{notifMessage.length}/120</span>
+                </div>
               </div>
             </div>
           )}
 
-          {/* ── Step: preview (editable) ── */}
-          {step === 'preview' && editedContent && (
-            <div className="p-5 space-y-4">
-              {/* Editable hint banner */}
-              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-700">
-                <Pencil className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                <p className="text-xs text-indigo-700 dark:text-indigo-300 font-medium">
-                  All fields are editable. Review & fix the AI content before sending.
-                </p>
-              </div>
-
-              {/* Blog deep link */}
-              {blogId && (
-                <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700">
-                  <FileText className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span className="text-xs text-emerald-700 dark:text-emerald-300 flex-1 truncate font-mono">
-                    #/blog/{blogId}
-                  </span>
-                  <button onClick={copyBlogLink} className="text-emerald-600 hover:text-emerald-700 transition-colors shrink-0">
-                    {copied ? <CheckCheck className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  </button>
-                </div>
-              )}
-
-              {/* Editable content fields */}
-              {previewFields.map(({ key, icon, label, color, multiline, rows }) => (
-                <div
-                  key={key}
-                  className={cn(
-                    'rounded-2xl border p-3 space-y-2',
-                    color === 'indigo' && 'bg-indigo-50/60 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-700',
-                    color === 'amber'  && 'bg-amber-50/60  dark:bg-amber-900/20  border-amber-200  dark:border-amber-700',
-                    color === 'violet' && 'bg-violet-50/60 dark:bg-violet-900/20 border-violet-200 dark:border-violet-700',
-                    color === 'sky'    && 'bg-sky-50/60    dark:bg-sky-900/20    border-sky-200    dark:border-sky-700',
-                    color === 'rose'   && 'bg-rose-50/60   dark:bg-rose-900/20   border-rose-200   dark:border-rose-700',
-                  )}
-                >
-                  <div className={cn(
-                    'flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider',
-                    color === 'indigo' && 'text-indigo-600 dark:text-indigo-400',
-                    color === 'amber'  && 'text-amber-600  dark:text-amber-400',
-                    color === 'violet' && 'text-violet-600 dark:text-violet-400',
-                    color === 'sky'    && 'text-sky-600    dark:text-sky-400',
-                    color === 'rose'   && 'text-rose-600   dark:text-rose-400',
-                  )}>
-                    {icon} {label}
-                    <Pencil className="w-2.5 h-2.5 ml-auto opacity-40" />
+          {/* ── Step: sent ── */}
+          {step === 'sent' && blogId && (
+            <div className="p-5">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.94, y: 12 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                className="rounded-2xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 overflow-hidden"
+              >
+                <div className="flex items-center gap-3 px-4 py-3.5 bg-emerald-500/10 border-b border-emerald-200 dark:border-emerald-700">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-500 flex items-center justify-center shrink-0 shadow-md shadow-emerald-900/20">
+                    <CheckCheck className="w-5 h-5 text-white" />
                   </div>
-                  {multiline ? (
-                    <textarea
-                      value={editedContent[key]}
-                      onChange={(e) => updateField(key, e.target.value)}
-                      rows={rows ?? 4}
-                      className="w-full text-sm leading-relaxed bg-transparent resize-y focus:outline-none text-slate-700 dark:text-slate-200 placeholder-slate-300 border-0 p-0"
-                    />
-                  ) : (
-                    <input
-                      type="text"
-                      value={editedContent[key]}
-                      onChange={(e) => updateField(key, e.target.value)}
-                      className="w-full text-sm bg-transparent focus:outline-none text-slate-700 dark:text-slate-200 border-0 p-0"
-                    />
-                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-extrabold text-emerald-800 dark:text-emerald-200">Campaign Sent Successfully!</p>
+                    <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">
+                      {selectedUids.size} user{selectedUids.size !== 1 ? 's' : ''} queued for notification
+                    </p>
+                  </div>
                 </div>
-              ))}
-
-              {/* Send result */}
-              {sendResult && (
-                <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={cn(
-                    'p-3 rounded-2xl border text-sm leading-relaxed whitespace-pre-line',
-                    sendResult.startsWith('✅')
-                      ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300'
-                      : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700 text-red-700 dark:text-red-300'
-                  )}
-                >
-                  {sendResult}
-                </motion.div>
-              )}
+                <div className="px-4 py-3 space-y-2.5">
+                  <div className="flex items-center gap-2 p-2.5 rounded-xl bg-white dark:bg-slate-700/50 border border-emerald-100 dark:border-emerald-800">
+                    <FileText className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span className="text-[11px] text-emerald-700 dark:text-emerald-300 flex-1 truncate font-mono">
+                      #/blog/{blogId}
+                    </span>
+                    <button onClick={copyBlogLink} className="shrink-0 p-1 rounded text-emerald-500 hover:text-emerald-700 transition-colors">
+                      {copied ? <CheckCheck className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Deploy <code className="font-mono bg-slate-100 dark:bg-slate-700 px-1 rounded">processNotificationQueue</code> Cloud Function to dispatch FCM push notifications.
+                  </p>
+                </div>
+              </motion.div>
             </div>
           )}
         </div>
@@ -552,41 +489,36 @@ const CategoryUsersModal: React.FC<CategoryUsersModalProps> = ({
                 }
               </p>
               <button
-                onClick={handleGenerate}
+                onClick={handleCompose}
                 disabled={selectedUids.size === 0}
                 className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-50 text-white font-bold text-sm rounded-2xl transition-all shadow-lg shadow-indigo-500/25"
               >
-                <Sparkles className="w-4 h-4" />
-                Target with AI Campaign
+                <Send className="w-4 h-4" />
+                Compose Campaign
               </button>
             </div>
           )}
 
-          {step === 'preview' && (
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={handleSendPreview}
-                disabled={isSending}
-                className="flex items-center gap-1.5 px-4 py-2.5 bg-amber-100 dark:bg-amber-900/30 hover:bg-amber-200 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-300 text-sm font-bold rounded-2xl transition-all disabled:opacity-50"
-              >
-                <Eye className="w-4 h-4" /> Preview (My Device)
-              </button>
-              <button
-                onClick={resetToSelect}
-                disabled={isSending}
-                className="flex items-center gap-1.5 px-4 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-sm font-bold rounded-2xl transition-all disabled:opacity-50"
-              >
-                <RefreshCw className="w-4 h-4" /> Regenerate
-              </button>
-              <button
-                onClick={handleSendCampaign}
-                disabled={isSending || !editedContent}
-                className="flex items-center gap-1.5 px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-sm font-bold rounded-2xl transition-all shadow-md shadow-indigo-500/25 ml-auto disabled:opacity-50"
-              >
-                {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                Send to {selectedUids.size} User{selectedUids.size !== 1 ? 's' : ''} Now
-              </button>
-            </div>
+          {step === 'compose' && (
+            <button
+              onClick={handleSend}
+              disabled={isSending}
+              className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-50 text-white font-bold text-sm rounded-2xl transition-all shadow-lg shadow-indigo-500/25"
+            >
+              {isSending
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</>
+                : <><Send className="w-4 h-4" /> Send to {selectedUids.size} User{selectedUids.size !== 1 ? 's' : ''}</>
+              }
+            </button>
+          )}
+
+          {step === 'sent' && (
+            <button
+              onClick={onClose}
+              className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold text-sm rounded-2xl transition-all"
+            >
+              Close
+            </button>
           )}
         </div>
       </motion.div>
@@ -604,6 +536,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   // ── Data state
   const [rawUsers, setRawUsers] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [userIntelligenceMap, setUserIntelligenceMap] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
 
   // ── Filter state
@@ -641,7 +574,16 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       (snap) => { setTransactions(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); txReady = true; maybeReady(); },
       (err) => { handleFirestoreError(err, OperationType.LIST, 'transactions'); txReady = true; maybeReady(); }
     );
-    return () => { unsubUsers(); unsubTx(); };
+    const unsubIntelligence = onSnapshot(
+      collection(db, 'user_intelligence'),
+      (snap) => {
+        const map: Record<string, any> = {};
+        snap.docs.forEach((d) => { map[d.id] = { id: d.id, ...d.data() }; });
+        setUserIntelligenceMap(map);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'user_intelligence')
+    );
+    return () => { unsubUsers(); unsubTx(); unsubIntelligence(); };
   }, []);
 
   // ── Computed ─────────────────────────────────────────────────────────────────
@@ -790,6 +732,75 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     rawUsers.forEach((u: any) => { if (u.profession) set.add(u.profession); });
     return [...set].sort();
   }, [rawUsers]);
+
+  /** Ranked users enriched with all-time behavioral intelligence from user_intelligence collection. */
+  const intelligenceRows = useMemo(() => {
+    return rawUsers
+      .map((u: any) => {
+        const intel = userIntelligenceMap[u.id];
+        if (!intel) return null;
+        const totalSpent = intel.totalSpentByCategory as Record<string, number> | undefined;
+        const frequency = intel.frequency as Record<string, number> | undefined;
+        const topCat = totalSpent
+          ? Object.entries(totalSpent).sort((a, b) => b[1] - a[1])[0]
+          : null;
+        const mostFrequent = frequency
+          ? Object.entries(frequency).sort((a, b) => b[1] - a[1])[0]
+          : null;
+        const totalAllTimeSpend = totalSpent
+          ? Object.values(totalSpent).reduce((s, v) => s + v, 0)
+          : 0;
+        return {
+          id: u.id,
+          displayName: u.displayName,
+          email: u.email,
+          photoURL: u.photoURL,
+          profession: u.profession,
+          lastSpentCategory: intel.lastSpentCategory as string | undefined,
+          topCategory: topCat ? topCat[0] : undefined,
+          topCategoryAmount: topCat ? topCat[1] : 0,
+          mostFrequentCategory: mostFrequent ? mostFrequent[0] : undefined,
+          mostFrequentCount: mostFrequent ? mostFrequent[1] : 0,
+          totalAllTimeSpend,
+          customCategories: (intel.customCategories as string[] | undefined) ?? [],
+          totalSpentByCategory: totalSpent ?? {},
+          frequency: frequency ?? {},
+        };
+      })
+      .filter(Boolean)
+      .sort((a: any, b: any) => b.totalAllTimeSpend - a.totalAllTimeSpend) as {
+        id: string;
+        displayName: string;
+        email: string;
+        photoURL?: string;
+        profession?: string;
+        lastSpentCategory?: string;
+        topCategory?: string;
+        topCategoryAmount: number;
+        mostFrequentCategory?: string;
+        mostFrequentCount: number;
+        totalAllTimeSpend: number;
+        customCategories: string[];
+        totalSpentByCategory: Record<string, number>;
+        frequency: Record<string, number>;
+      }[];
+  }, [userIntelligenceMap, rawUsers]);
+
+  /** Aggregated custom category list with contributing users, sorted by popularity. */
+  const customCategoriesReport = useMemo(() => {
+    const catMap: Record<string, { users: { id: string; displayName: string; email: string }[] }> = {};
+    Object.entries(userIntelligenceMap).forEach(([uid, intel]) => {
+      const u = rawUsers.find((x: any) => x.id === uid);
+      const userInfo = { id: uid, displayName: u?.displayName || 'Unknown', email: u?.email || '' };
+      ((intel.customCategories as string[] | undefined) ?? []).forEach((cat) => {
+        if (!catMap[cat]) catMap[cat] = { users: [] };
+        catMap[cat].users.push(userInfo);
+      });
+    });
+    return Object.entries(catMap)
+      .map(([category, { users: catUsers }]) => ({ category, users: catUsers }))
+      .sort((a, b) => b.users.length - a.users.length);
+  }, [userIntelligenceMap, rawUsers]);
 
   const filteredUsers = useMemo(() => users.filter((u) => {
     const term = searchTerm.toLowerCase();
@@ -1072,7 +1083,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             </div>
             <div className="min-w-0">
               <h3 className="font-bold text-slate-800 dark:text-white">Category Intelligence Explorer</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Click any row to see users &amp; launch AI campaign · All time</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Click any row to see users &amp; send manual campaign · All time</p>
             </div>
           </div>
           {/* Tab switcher */}
@@ -1158,6 +1169,117 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           )}
         </div>
       </motion.div>
+
+      {/* ── User Intelligence Panel ── */}
+      {(intelligenceRows.length > 0 || customCategoriesReport.length > 0) && (
+        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+          className="neon-card overflow-hidden rounded-[2rem] border border-slate-200/80 dark:border-slate-700 space-y-0">
+
+          {/* Header */}
+          <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-700 p-5 sm:p-6 bg-gradient-to-r from-violet-50 to-indigo-50 dark:from-violet-950/20 dark:to-indigo-950/20">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-100 dark:bg-violet-900/40">
+              <Sparkles className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-800 dark:text-white">User Intelligence — Behavioral Spending</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                All-time data from <code className="font-mono text-violet-600 dark:text-violet-400">user_intelligence</code> collection · {intelligenceRows.length} tracked user{intelligenceRows.length !== 1 ? 's' : ''}
+              </p>
+            </div>
+          </div>
+
+          {/* Behavioral rows */}
+          {intelligenceRows.length > 0 && (
+            <>
+              <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 px-5 py-3 bg-slate-50/80 dark:bg-slate-900/40 border-b border-slate-100 dark:border-slate-700 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                <span>User</span>
+                <span className="text-right w-28 hidden sm:block">Total Spent</span>
+                <span className="text-right w-28">Top Category</span>
+                <span className="text-right w-24 hidden sm:block">Last Spent</span>
+                <span className="text-right w-20">Freq.</span>
+              </div>
+              <div className="divide-y divide-slate-100 dark:divide-slate-700/60 max-h-72 overflow-y-auto">
+                {intelligenceRows.map((row) => (
+                  <div key={row.id} className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-2 px-5 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors"
+                    onClick={() => {
+                      const u = users.find((x) => x.id === row.id);
+                      if (u) handleUserClick(u);
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      {row.photoURL
+                        ? <img src={row.photoURL} alt="" className="h-8 w-8 rounded-xl object-cover shrink-0" />
+                        : <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-400 to-indigo-500 text-white text-xs font-bold">{(row.displayName || '?').charAt(0).toUpperCase()}</div>
+                      }
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-800 dark:text-slate-200 truncate">{row.displayName || 'Unknown'}</p>
+                        <p className="text-[10px] text-slate-400 truncate">{row.email}</p>
+                      </div>
+                    </div>
+
+                    <span className="hidden sm:block text-xs font-bold text-red-600 dark:text-red-400 text-right w-28">
+                      {formatCurrency(row.totalAllTimeSpend, language)}
+                    </span>
+
+                    <span className="text-right w-28">
+                      {row.topCategory ? (
+                        <span className="inline-flex items-center gap-1 rounded-xl bg-amber-50 dark:bg-amber-900/30 px-2.5 py-1 text-[11px] font-bold text-amber-700 dark:text-amber-300 max-w-[6.5rem] truncate">
+                          {row.topCategory}
+                        </span>
+                      ) : <span className="text-slate-300 text-xs">—</span>}
+                    </span>
+
+                    <span className="hidden sm:block text-right w-24">
+                      {row.lastSpentCategory ? (
+                        <span className="inline-flex items-center gap-1 rounded-xl bg-slate-100 dark:bg-slate-700 px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300 max-w-[5.5rem] truncate">
+                          {row.lastSpentCategory}
+                        </span>
+                      ) : <span className="text-slate-300 text-xs">—</span>}
+                    </span>
+
+                    <div className="text-right w-20 space-y-0.5">
+                      {row.mostFrequentCategory && (
+                        <>
+                          <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400">{row.mostFrequentCount}×</p>
+                          <p className="text-[10px] text-slate-400 truncate max-w-[4.5rem]">{row.mostFrequentCategory}</p>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Custom Categories Report */}
+          {customCategoriesReport.length > 0 && (
+            <div className="border-t border-slate-100 dark:border-slate-700 p-5 sm:p-6 space-y-3">
+              <div className="flex items-center gap-2">
+                <Star className="h-4 w-4 text-amber-500" />
+                <h4 className="text-sm font-bold text-slate-700 dark:text-slate-200">User-Created Custom Categories</h4>
+                <span className="ml-auto rounded-full bg-amber-100 dark:bg-amber-900/30 px-2.5 py-0.5 text-[10px] font-black text-amber-700 dark:text-amber-300">
+                  {customCategoriesReport.length} custom
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {customCategoriesReport.map(({ category, users: catUsers }) => (
+                  <div key={category}
+                    className="flex items-center gap-1.5 rounded-2xl border border-amber-200 dark:border-amber-700/50 bg-amber-50 dark:bg-amber-900/20 px-3 py-1.5"
+                    title={`Created by: ${catUsers.map((u) => u.displayName).join(', ')}`}
+                  >
+                    <span className="text-xs font-bold text-amber-800 dark:text-amber-200">{category}</span>
+                    <span className="rounded-full bg-amber-200 dark:bg-amber-700 px-1.5 py-0.5 text-[10px] font-black text-amber-900 dark:text-amber-100">
+                      {catUsers.length}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-400">These are categories created by users that are not in the default list. Use them to discover new spending patterns.</p>
+            </div>
+          )}
+        </motion.div>
+      )}
 
       {/* ── Advanced Filters ── */}
       <div className="space-y-3">

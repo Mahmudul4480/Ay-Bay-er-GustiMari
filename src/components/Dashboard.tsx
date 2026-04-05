@@ -31,7 +31,7 @@ import {
 } from 'recharts';
 import type { PieSectorDataItem } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
-import { TrendingUp, TrendingDown, Wallet, CreditCard, AlertTriangle, Trash2, PieChart as PieChartIcon, Edit2, ArrowRight, X, CalendarX } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, CreditCard, AlertTriangle, Trash2, PieChart as PieChartIcon, Edit2, ArrowRight, X, CalendarX, Lightbulb, Sparkles } from 'lucide-react';
 import TransactionForm from './TransactionForm';
 import { Transaction } from '../hooks/useTransactions';
 import { deleteDoc, doc } from 'firebase/firestore';
@@ -341,6 +341,75 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
           </motion.div>
         ))}
       </div>
+
+      {/* ── Smart Tips neon banner ───────────────────────────────────────── */}
+      <motion.button
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.45, type: 'spring', stiffness: 260, damping: 22 }}
+        whileHover={{ scale: 1.02, y: -3, transition: { type: 'spring', stiffness: 340, damping: 22 } }}
+        whileTap={{ scale: 0.98 }}
+        onClick={() => onTabChange?.('smarttips')}
+        className="smart-tips-banner group relative w-full overflow-hidden rounded-3xl border border-purple-300/60 dark:border-purple-600/40 text-left"
+        style={{
+          background: 'linear-gradient(135deg, rgba(168,85,247,0.10) 0%, rgba(99,102,241,0.12) 50%, rgba(6,182,212,0.08) 100%)',
+        }}
+        aria-label="Open Smart Tips"
+      >
+        {/* Animated background shimmer */}
+        <div
+          className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/10 to-transparent transition-transform duration-700 group-hover:translate-x-full"
+          aria-hidden
+        />
+
+        {/* Neon accent line at top */}
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-purple-400 to-transparent opacity-60" />
+
+        <div className="flex items-center gap-4 p-4 sm:p-5">
+          {/* Icon with pulse ring */}
+          <div className="relative shrink-0">
+            <span className="absolute -inset-1.5 animate-ping rounded-full bg-purple-400 opacity-25" />
+            <div
+              className="relative flex h-12 w-12 items-center justify-center rounded-2xl"
+              style={{ background: 'linear-gradient(135deg,#a855f7 0%,#6366f1 100%)' }}
+            >
+              <Lightbulb className="h-6 w-6 text-white drop-shadow-[0_0_6px_rgba(255,255,255,0.8)]" />
+            </div>
+          </div>
+
+          {/* Text content */}
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="neon-text-purple bg-gradient-to-r from-purple-600 to-indigo-500 bg-clip-text text-base font-black text-transparent sm:text-lg">
+                {language === 'bn' ? 'আর্থিক টিপস' : 'Smart Tips'}
+              </span>
+              {/* Live dot badge */}
+              <span className="flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-purple-500 opacity-75" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-purple-500" />
+                </span>
+                {language === 'bn' ? 'নতুন' : 'LIVE'}
+              </span>
+            </div>
+            <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+              {language === 'bn'
+                ? 'আপনার ব্যয়ের উপর ভিত্তি করে পার্সোনালাইজড পরামর্শ দেখুন'
+                : 'Personalised financial tips based on your spending patterns'}
+            </p>
+          </div>
+
+          {/* Arrow */}
+          <div className="shrink-0 flex items-center gap-1 rounded-xl bg-purple-100 px-3 py-2 text-xs font-bold text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
+            <Sparkles className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">{language === 'bn' ? 'দেখুন' : 'Explore'}</span>
+            <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
+          </div>
+        </div>
+
+        {/* Bottom neon line */}
+        <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-indigo-400 to-transparent opacity-40" />
+      </motion.button>
 
       <p className="text-center text-xs text-slate-500 dark:text-slate-400 sm:text-left">
         {t('debtTotalsCumulative')}

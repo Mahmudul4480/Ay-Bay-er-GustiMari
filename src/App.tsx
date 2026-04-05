@@ -5,7 +5,7 @@ import { TransactionFeedbackProvider } from './contexts/TransactionFeedbackConte
 import { TransactionsProvider } from './hooks/useTransactions';
 import { MonthSelectionProvider } from './contexts/MonthSelectionContext';
 import { loginWithGoogle, logout, isInAppBrowser, isConfigValid } from './firebaseConfig';
-import { LogOut, LayoutDashboard, CreditCard, Settings, Plus, Menu, X, Sun, Moon, AlertTriangle, Users, ArrowLeft, Home, Megaphone } from 'lucide-react';
+import { LogOut, LayoutDashboard, CreditCard, Settings, Plus, Menu, X, Sun, Moon, AlertTriangle, Users, ArrowLeft, Home, Megaphone, BookOpen, Lightbulb } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 import Dashboard from './pages/Dashboard';
@@ -17,7 +17,9 @@ import Onboarding from './components/Onboarding';
 import ProfessionSelector from './components/ProfessionSelector';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminEngagement from './pages/AdminEngagement';
+import AdminBlogCreator from './pages/AdminBlogCreator';
 import BlogPage from './pages/BlogPage';
+import SmartTipsList from './components/SmartTipsList';
 import WelcomeOverlay from './components/WelcomeOverlay';
 import { useFcmToken } from './hooks/useFcmToken';
 
@@ -296,15 +298,17 @@ const AppContent: React.FC = () => {
 
   const isAdminUser = user?.email === ADMIN_EMAIL && userProfile?.role === 'admin';
 
-  const tabs = [
+  const tabs: { id: string; label: string; icon: React.ElementType; neon?: boolean }[] = [
     { id: 'dashboard', label: t('dashboard'), icon: LayoutDashboard },
     { id: 'transactions', label: t('transactions'), icon: CreditCard },
+    { id: 'smarttips', label: language === 'bn' ? 'আর্থিক টিপস' : 'Smart Tips', icon: Lightbulb, neon: true },
     { id: 'settings', label: t('settings'), icon: Settings },
   ];
 
   if (isAdminUser) {
     tabs.push({ id: 'admin', label: 'Analytics', icon: Users });
     tabs.push({ id: 'engagement', label: 'Engage', icon: Megaphone });
+    tabs.push({ id: 'blogcreator', label: 'Blogs', icon: BookOpen });
   }
 
   const goDashboard = () => {
@@ -448,21 +452,50 @@ const AppContent: React.FC = () => {
               </button>
             </div>
             <nav className="flex-1 px-4 space-y-2">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => { setActiveTab(tab.id); setIsSidebarOpen(false); }}
-                  className={cn(
-                    "w-full flex items-center gap-3 p-3 rounded-xl font-medium transition-all",
-                    activeTab === tab.id 
-                      ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400" 
-                      : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700"
-                  )}
-                >
-                  <tab.icon className="w-5 h-5" />
-                  {tab.label}
-                </button>
-              ))}
+              {tabs.map((tab) => {
+                const isActive = activeTab === tab.id;
+                if (tab.neon) {
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => { setActiveTab(tab.id); setIsSidebarOpen(false); }}
+                      className={cn(
+                        'smart-tips-sidebar-btn relative w-full flex items-center gap-3 p-3 rounded-xl font-bold transition-all hover:scale-[1.03] active:scale-[0.97]',
+                        isActive
+                          ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-[0_0_20px_rgba(168,85,247,0.55)]'
+                          : 'bg-gradient-to-r from-purple-50 to-indigo-50 text-purple-700 border border-purple-200/60 dark:from-purple-950/40 dark:to-indigo-950/40 dark:text-purple-300 dark:border-purple-700/40 hover:from-purple-100 hover:to-indigo-100 dark:hover:from-purple-900/50 dark:hover:to-indigo-900/50'
+                      )}
+                    >
+                      {/* Live ping dot */}
+                      <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
+                        <span className="absolute inline-flex h-3 w-3 animate-ping rounded-full bg-purple-400 opacity-60" />
+                        <tab.icon className="relative h-5 w-5" />
+                      </span>
+                      <span>{tab.label}</span>
+                      {!isActive && (
+                        <span className="ml-auto rounded-full bg-purple-500 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white">
+                          NEW
+                        </span>
+                      )}
+                    </button>
+                  );
+                }
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => { setActiveTab(tab.id); setIsSidebarOpen(false); }}
+                    className={cn(
+                      "w-full flex items-center gap-3 p-3 rounded-xl font-medium transition-all",
+                      isActive
+                        ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                        : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700"
+                    )}
+                  >
+                    <tab.icon className="w-5 h-5" />
+                    {tab.label}
+                  </button>
+                );
+              })}
             </nav>
             <div className="p-4 border-t border-slate-100 dark:border-slate-700">
               <div className="flex items-center gap-3 p-3 mb-4">
@@ -489,10 +522,17 @@ const AppContent: React.FC = () => {
         {activeTab === 'dashboard' && <Dashboard onTabChange={setActiveTab} />}
         {activeTab === 'transactions' && <TransactionList />}
         {activeTab === 'debts' && <DebtTracker />}
+        {activeTab === 'smarttips' && <SmartTipsList onBack={() => setActiveTab('dashboard')} />}
         {activeTab === 'settings' && <SettingsPage />}
         {activeTab === 'admin' && isAdminUser && <AdminDashboard onBack={() => setActiveTab('dashboard')} />}
         {activeTab === 'engagement' && isAdminUser && (
           <AdminEngagement
+            currentUserEmail={user?.email ?? ''}
+            onBack={() => setActiveTab('dashboard')}
+          />
+        )}
+        {activeTab === 'blogcreator' && isAdminUser && (
+          <AdminBlogCreator
             currentUserEmail={user?.email ?? ''}
             onBack={() => setActiveTab('dashboard')}
           />
