@@ -1,0 +1,154 @@
+// =============================================================================
+// Ay Bay Er GustiMari — Firestore Security Rules
+// =============================================================================
+// Copy everything BELOW the line into Firebase Console → Firestore → Rules
+// (Do not paste this comment block if your console rejects // comments — then
+//  use the same content from firestore.rules in the project root instead.)
+// =============================================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    /** Admin = fixed email + verified Google account (matches app + server checks). */
+    function isAdmin() {
+      return isAuthenticated()
+        && request.auth.token.email == 'chotan4480@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+
+    function isValidEmail(email) {
+      return email is string
+        && email.matches('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$');
+    }
+
+    function isValidUserCore(data) {
+      return data.uid is string
+        && data.email is string
+        && isValidEmail(data.email)
+        && (data.budgetLimit == null || data.budgetLimit is number);
+    }
+
+    /**
+     * On first document create, only the real admin account may set role=admin.
+     * Everyone else must create with role=user (prevents self-promotion to admin).
+     */
+    function isValidRoleOnCreate() {
+      return (request.resource.data.role == 'user')
+        || (
+          isAdmin()
+          && request.resource.data.role == 'admin'
+        );
+    }
+
+    /**
+     * Users may not change their own role after signup (blocks privilege escalation).
+     * Legacy docs without `role`: may set to `user`, or verified admin may set to `admin`.
+     */
+    function userRoleUnchanged() {
+      return request.resource.data.role == resource.data.role
+        || (
+          !resource.data.keys().hasAny(['role'])
+          && (
+            request.resource.data.role == 'user'
+            || (isAdmin() && request.resource.data.role == 'admin')
+          )
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Users
+    // -------------------------------------------------------------------------
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId)
+        && isValidUserCore(request.resource.data)
+        && isValidRoleOnCreate();
+      allow update: if isOwner(userId)
+        && isValidUserCore(request.resource.data)
+        && userRoleUnchanged();
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Transactions
+    // -------------------------------------------------------------------------
+    match /transactions/{transactionId} {
+      allow read: if isAuthenticated()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+
+      allow create: if isAuthenticated()
+        && request.resource.data.userId == request.auth.uid;
+
+      allow update: if isAuthenticated()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId;
+
+      allow delete: if isAuthenticated()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // -------------------------------------------------------------------------
+    // Debts
+    // -------------------------------------------------------------------------
+    match /debts/{debtId} {
+      allow read: if isAuthenticated()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+
+      allow create: if isAuthenticated()
+        && request.resource.data.userId == request.auth.uid;
+
+      allow update: if isAuthenticated()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId;
+
+      allow delete: if isAuthenticated()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // -------------------------------------------------------------------------
+    // Fixed finances
+    // -------------------------------------------------------------------------
+    match /fixedFinances/{fixedId} {
+      allow read: if isAuthenticated()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+
+      allow create: if isAuthenticated()
+        && request.resource.data.userId == request.auth.uid;
+
+      allow update: if isAuthenticated()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId;
+
+      allow delete: if isAuthenticated()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // -------------------------------------------------------------------------
+    // AI Blogs — admin writes; any authenticated user can read (for blog page)
+    // -------------------------------------------------------------------------
+    match /blogs/{blogId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // -------------------------------------------------------------------------
+    // Notification Queue — admin-only; processed by Cloud Function server-side
+    // -------------------------------------------------------------------------
+    match /notificationQueue/{queueId} {
+      allow read, write: if isAdmin();
+    }
+
+  }
+}

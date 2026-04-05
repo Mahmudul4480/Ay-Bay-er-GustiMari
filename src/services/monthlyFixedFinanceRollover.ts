@@ -1,4 +1,4 @@
-import { doc, writeBatch, Timestamp, updateDoc } from 'firebase/firestore';
+import { doc, writeBatch, Timestamp, updateDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import type { FixedFinance } from '../hooks/useTransactions';
 import { dateForScheduledDayInMonth, parseMonthKey } from '../lib/monthUtils';
@@ -24,8 +24,14 @@ export async function applyMonthlyFixedFinanceRollover(
 
   const { year, monthIndex } = parsed;
 
+  const userRef = doc(db, 'users', userId);
+  const userSnap = await getDoc(userRef);
+  if (userSnap.exists() && userSnap.data()?.fixedFinanceRolloverMonth === monthKey) {
+    return;
+  }
+
   if (fixedFinances.length === 0) {
-    await updateDoc(doc(db, 'users', userId), { fixedFinanceRolloverMonth: monthKey });
+    await updateDoc(userRef, { fixedFinanceRolloverMonth: monthKey });
     return;
   }
 
@@ -52,7 +58,7 @@ export async function applyMonthlyFixedFinanceRollover(
     });
   }
 
-  batch.update(doc(db, 'users', userId), { fixedFinanceRolloverMonth: monthKey });
+  batch.update(userRef, { fixedFinanceRolloverMonth: monthKey });
 
   await batch.commit();
 }
