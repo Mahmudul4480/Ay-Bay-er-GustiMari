@@ -1,37 +1,26 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
-import {
-  PROFESSIONS,
-  WELCOME_CHARACTER_URLS,
-  type ProfessionId,
-  getProfessionLabel,
-} from '../lib/professionData';
 
-function isProfessionId(id: string): id is ProfessionId {
-  return PROFESSIONS.some((p) => p.id === id);
-}
+const WELCOME_IMAGE = 'https://i.postimg.cc/KFrrzxzv/welcome.png';
 
 /**
- * Full-screen welcome: 3D-style transparent character (see WELCOME_CHARACTER_URLS) + speech bubble.
- * Uses userProfile from AuthContext. Auto-hides after 4s; runs again on every login or full refresh.
+ * Full-screen welcome overlay — shows user's name + welcome illustration.
+ * Auto-hides after 4s; runs again on every login or full refresh.
  */
 const WelcomeOverlay: React.FC = () => {
   const { user, loading, userProfile } = useAuth();
   const [dismissed, setDismissed] = useState(false);
 
-  const professionRaw = userProfile?.profession;
-  const hasProfession = typeof professionRaw === 'string' && String(professionRaw).trim() !== '';
   const shouldShow =
     !loading &&
     !!user &&
-    userProfile?.onboardingCompleted === true &&
-    hasProfession;
+    userProfile?.onboardingCompleted === true;
 
-  const pid: ProfessionId =
-    professionRaw && isProfessionId(professionRaw) ? professionRaw : 'doctor';
-  const imageUrl = WELCOME_CHARACTER_URLS[pid];
-  const label = getProfessionLabel(professionRaw);
+  const displayName =
+    user?.displayName ||
+    user?.email?.split('@')[0] ||
+    'there';
 
   useEffect(() => {
     if (!shouldShow) return;
@@ -39,7 +28,7 @@ const WelcomeOverlay: React.FC = () => {
     // Start fade-out at 3600 ms so the 400 ms exit animation finishes exactly at 4 s
     const t = window.setTimeout(() => setDismissed(true), 3600);
     return () => window.clearTimeout(t);
-  }, [shouldShow, user?.uid, professionRaw]);
+  }, [shouldShow, user?.uid]);
 
   const visible = shouldShow && !dismissed;
 
@@ -74,7 +63,7 @@ const WelcomeOverlay: React.FC = () => {
               transition={{ delay: 0.15, duration: 0.35 }}
             >
               <p className="text-lg font-extrabold tracking-tight text-slate-900 dark:text-white sm:text-xl">
-                Welcome {label}!
+                Welcome {displayName}!
               </p>
               <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
                 Your personalized dashboard is ready.
@@ -93,7 +82,7 @@ const WelcomeOverlay: React.FC = () => {
             >
               <div className="relative h-[min(52vh,420px)] w-[min(85vw,320px)] sm:h-[420px] sm:w-[320px]">
                 <img
-                  src="https://illustrations.popsy.co/white/finance-app.svg"
+                  src={WELCOME_IMAGE}
                   alt=""
                   className="h-full w-full object-contain object-bottom [filter:drop-shadow(0_12px_24px_rgba(99,102,241,0.35))]"
                   draggable={false}

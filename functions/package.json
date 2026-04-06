@@ -1,0 +1,23 @@
+{
+  "name": "ay-bay-er-gustimari-functions",
+  "description": "Firebase Cloud Functions for Ay Bay Er GustiMari",
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "serve": "npm run build && firebase emulators:start --only functions",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log"
+  },
+  "engines": {
+    "node": "22"
+  },
+  "main": "lib/index.js",
+  "dependencies": {
+    "firebase-admin": "^13.7.0",
+    "firebase-functions": "^7.2.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  },
+  "private": true
+}

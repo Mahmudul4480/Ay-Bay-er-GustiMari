@@ -68,9 +68,8 @@ const AppContent: React.FC = () => {
 
   // Blog deep-link routing
   const { blogId, closeBlog } = useBlogRoute();
-  if (blogId) {
-    return <BlogPage blogId={blogId} onBack={closeBlog} />;
-  }
+
+  // ── All hooks must be declared before any conditional return ──
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = React.useState(false);
   const [isDarkMode, setIsDarkMode] = React.useState(() => {
@@ -309,6 +308,11 @@ const AppContent: React.FC = () => {
         </motion.div>
       </div>
     );
+  }
+
+  // Blog deep-link — only after auth is confirmed, so Firestore rules pass
+  if (blogId) {
+    return <BlogPage blogId={blogId} onBack={closeBlog} />;
   }
 
   if (userProfile && needsProfession(userProfile)) {
