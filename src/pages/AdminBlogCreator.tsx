@@ -10,6 +10,7 @@ import {
   query,
   orderBy,
   Timestamp,
+  getDocs,
 } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -36,6 +37,7 @@ import {
   UploadCloud,
 } from 'lucide-react';
 import { db, storage } from '../firebaseConfig';
+import { queueNotificationsForUsers } from '../lib/fcmUtils';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { cn } from '../lib/utils';
 
@@ -78,6 +80,8 @@ interface FormState {
   notificationMessage: string;
   status: 'draft' | 'published';
   imageUrl: string;
+  /** When publishing: queue FCM for every visible user; tap opens `#/blog/:id` via `queueNotificationsForUsers`. */
+  notifyAllOnPublish: boolean;
 }
 
 const emptyForm: FormState = {
@@ -87,6 +91,7 @@ const emptyForm: FormState = {
   notificationMessage: '',
   status: 'published',
   imageUrl: '',
+  notifyAllOnPublish: false,
 };
 
 interface AdminBlogCreatorProps {
@@ -352,6 +357,24 @@ function BlogFormModal({
             </p>
           </div>
 
+          <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-indigo-200/70 bg-indigo-50/60 p-3.5 dark:border-indigo-800/50 dark:bg-indigo-950/35">
+            <input
+              type="checkbox"
+              checked={form.notifyAllOnPublish}
+              onChange={(e) => onChange({ notifyAllOnPublish: e.target.checked })}
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+            />
+            <span className="min-w-0">
+              <span className="block text-sm font-bold text-slate-800 dark:text-white">
+                Notify all users about this blog
+              </span>
+              <span className="mt-0.5 block text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                When you save with status Published, queues one notification per user (excluding hidden accounts). Tap opens{' '}
+                <code className="rounded bg-white/80 px-1 dark:bg-slate-800">#/blog/:blogId</code> (same as Global campaign).
+              </span>
+            </span>
+          </label>
+
           {/* Blog Content */}
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1">
@@ -569,6 +592,19 @@ export default function AdminBlogCreator({ currentUserEmail, onBack }: AdminBlog
     setTimeout(() => setToast(null), 3500);
   };
 
+  /** Same rules as admin global campaign: all users except `hideFromAdminList`; `clickAction` is `#/blog/:blogId`. */
+  const queueNotifyAllForBlog = async (blogId: string) => {
+    const usersSnap = await getDocs(collection(db, 'users'));
+    const targetIds = usersSnap.docs
+      .filter((d) => !(d.data() as { hideFromAdminList?: boolean }).hideFromAdminList)
+      .map((d) => d.id);
+    if (targetIds.length === 0) return { notified: 0 };
+    const notifTitle = form.title.trim();
+    const notifBody = (form.notificationMessage.trim() || form.title.trim()).slice(0, 500);
+    await queueNotificationsForUsers(blogId, targetIds, notifTitle, notifBody);
+    return { notified: targetIds.length };
+  };
+
   const openCreate = () => {
     setEditingId(null);
     setForm(emptyForm);
@@ -586,6 +622,7 @@ export default function AdminBlogCreator({ currentUserEmail, onBack }: AdminBlog
       notificationMessage: blog.notificationMessage || '',
       status: blog.status || 'published',
       imageUrl: blog.imageUrl || '',
+      notifyAllOnPublish: false,
     });
     setImageFile(null);
     setUploadProgress(null);
@@ -642,9 +679,23 @@ export default function AdminBlogCreator({ currentUserEmail, onBack }: AdminBlog
           imageUrl: resolvedImageUrl,
           type: 'manual',
         });
-        showToast('Blog updated successfully!');
+        if (form.notifyAllOnPublish && form.status === 'published') {
+          try {
+            const { notified } = await queueNotifyAllForBlog(editingId);
+            if (notified > 0) {
+              showToast(`Updated · notified ${notified} user${notified !== 1 ? 's' : ''}`);
+            } else {
+              showToast('Blog updated successfully!');
+            }
+          } catch (ne: unknown) {
+            const msg = ne instanceof Error ? ne.message : String(ne);
+            showToast(`Blog saved, but notify-all failed: ${msg}`, 'error');
+          }
+        } else {
+          showToast('Blog updated successfully!');
+        }
       } else {
-        await addDoc(collection(db, 'blogs'), {
+        const docRef = await addDoc(collection(db, 'blogs'), {
           title: form.title.trim(),
           blogContent: form.blogContent.trim(),
           category: form.category,
@@ -659,7 +710,21 @@ export default function AdminBlogCreator({ currentUserEmail, onBack }: AdminBlog
           imagePrompt: '',
           ctaText: 'আপনার আজকের হিসাবটি লিখুন - Ay Bay Er GustiMari-তে যান',
         });
-        showToast('Blog published successfully!');
+        if (form.notifyAllOnPublish && form.status === 'published') {
+          try {
+            const { notified } = await queueNotifyAllForBlog(docRef.id);
+            if (notified > 0) {
+              showToast(`Published · notified ${notified} user${notified !== 1 ? 's' : ''}`);
+            } else {
+              showToast('Blog published successfully!');
+            }
+          } catch (ne: unknown) {
+            const msg = ne instanceof Error ? ne.message : String(ne);
+            showToast(`Blog saved, but notify-all failed: ${msg}`, 'error');
+          }
+        } else {
+          showToast('Blog published successfully!');
+        }
       }
       closeForm();
     } catch (e: any) {

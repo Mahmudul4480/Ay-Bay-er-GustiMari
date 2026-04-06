@@ -21,6 +21,20 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
   return result as NotificationPermissionStatus;
 }
 
+// ─── Service worker registration (explicit, avoids failed-service-worker-registration) ──
+
+async function getMessagingSwRegistration(): Promise<ServiceWorkerRegistration | null> {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return null;
+  try {
+    const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' });
+    await navigator.serviceWorker.ready;
+    return reg;
+  } catch (err) {
+    console.warn('SW registration failed:', err);
+    return null;
+  }
+}
+
 // ─── Token retrieval ─────────────────────────────────────────────────────────
 
 export async function getFcmToken(): Promise<string | null> {
@@ -29,7 +43,13 @@ export async function getFcmToken(): Promise<string | null> {
     if (!messaging) return null;
     const permission = await requestNotificationPermission();
     if (permission !== 'granted') return null;
-    const token = await getToken(messaging, { vapidKey: VAPID_KEY });
+    // Explicitly pass serviceWorkerRegistration to prevent
+    // messaging/failed-service-worker-registration in Chrome ≥ 109 and Firefox
+    const swReg = await getMessagingSwRegistration();
+    const token = await getToken(messaging, {
+      vapidKey: VAPID_KEY,
+      ...(swReg ? { serviceWorkerRegistration: swReg } : {}),
+    });
     return token || null;
   } catch (err) {
     console.warn('getFcmToken failed:', err);
@@ -123,7 +143,7 @@ export async function sendBrowserPreviewNotification(
  *   blogId       — which blog to link to
  *   title        — notification title
  *   message      — notification body text
- *   clickAction  — deep-link URL the user lands on after tapping
+ *   clickAction  — full URL with hash route, e.g. …/#/blog/:blogId (matches in-app `/blog/:id`)
  *   status       — 'pending' until the Cloud Function processes it
  *   batchId      — groups all entries from a single campaign send
  *   createdAt    — server-side timestamp
@@ -165,6 +185,66 @@ export async function queueNotificationsForUsers(
       } satisfies Omit<NotificationQueueEntry, 'createdAt'> & { createdAt: ReturnType<typeof serverTimestamp> }),
     ),
   );
+
+  return batchId;
+}
+
+/**
+ * Bulk manual notifications (no blog): same `batchId`, `blogId: 'manual'`, home `clickAction`.
+ */
+export async function queueManualNotificationsForUsers(
+  targetUserIds: string[],
+  title: string,
+  message: string,
+): Promise<string> {
+  if (targetUserIds.length === 0) return `batch_${Date.now()}`;
+  const batchId = `batch_${Date.now()}`;
+  const clickAction = `${window.location.origin}${window.location.pathname}#/`;
+  await Promise.all(
+    targetUserIds.map((userId) =>
+      addDoc(collection(db, 'notificationQueue'), {
+        userId,
+        blogId: 'manual',
+        title,
+        message,
+        clickAction,
+        batchId,
+        status: 'pending',
+        createdAt: serverTimestamp(),
+      } satisfies Omit<NotificationQueueEntry, 'createdAt'> & { createdAt: ReturnType<typeof serverTimestamp> }),
+    ),
+  );
+  return batchId;
+}
+
+/**
+ * Queues a single notification for one user (same schema as `queueNotificationsForUsers`).
+ * Use when no blog exists: `blogId` is stored as `manual` and the tap target is the app home (`#/`).
+ */
+export async function queueNotificationForUser(
+  userId: string,
+  title: string,
+  message: string,
+  options?: { blogId?: string | null },
+): Promise<string> {
+  const rawBlogId = options?.blogId?.trim();
+  const hasBlog = Boolean(rawBlogId && rawBlogId !== 'manual');
+  const blogId = hasBlog ? rawBlogId! : 'manual';
+  const clickAction = hasBlog
+    ? `${window.location.origin}${window.location.pathname}#/blog/${blogId}`
+    : `${window.location.origin}${window.location.pathname}#/`;
+  const batchId = `batch_${Date.now()}`;
+
+  await addDoc(collection(db, 'notificationQueue'), {
+    userId,
+    blogId,
+    title,
+    message,
+    clickAction,
+    batchId,
+    status: 'pending',
+    createdAt: serverTimestamp(),
+  } satisfies Omit<NotificationQueueEntry, 'createdAt'> & { createdAt: ReturnType<typeof serverTimestamp> });
 
   return batchId;
 }

@@ -6,6 +6,7 @@
  * Trigger : New document created in `notificationQueue/{docId}`
  * Purpose : Read the queued entry, look up the target user's FCM token from
  *           `users/{userId}`, send an FCM push notification via Admin SDK,
+ *           write `users/{userId}/inAppNotifications` for the in-app bell UI,
  *           then update the queue doc to `status: "sent"` (or `"failed"`).
  *
  * Document schema (notificationQueue/{docId}):
@@ -135,10 +136,11 @@ export const processNotificationQueue = onDocumentCreated(
       },
       // `data` payload is delivered even when the app is in the background.
       // The service-worker can read these to open the correct deep-link.
+      // FCM `data` values must be strings (web + Admin SDK).
       data: {
-        blogId,
-        url: clickAction,
-        clickAction,
+        blogId: String(blogId ?? ""),
+        url: String(clickAction ?? ""),
+        clickAction: String(clickAction ?? ""),
       },
       webpush: {
         notification: {
@@ -183,6 +185,35 @@ export const processNotificationQueue = onDocumentCreated(
 
     try {
       const response = await messaging.send(fcmMessage);
+
+      // ── 5. In-app notification (users/{userId}/inAppNotifications) ────────
+      // Written immediately after a successful FCM send. Sub-collection is
+      // created automatically on first .add(). Failure is logged but does not
+      // revert the queue doc to failed (push already succeeded).
+      try {
+        await db
+          .collection("users")
+          .doc(userId)
+          .collection("inAppNotifications")
+          .add({
+            title,
+            body: message,
+            url: clickAction,
+            read: false,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            blogId: blogId ?? "",
+          });
+        logger.info(`In-app notification saved for userId=${userId}`, {
+          docId: docRef.id,
+        });
+      } catch (inAppErr) {
+        logger.error("Failed to save in-app notification to Firestore.", {
+          userId,
+          docId: docRef.id,
+          err: String(inAppErr),
+        });
+      }
+
       logger.info(`Notification sent successfully. messageId=${response}`, {
         userId,
         docId: docRef.id,

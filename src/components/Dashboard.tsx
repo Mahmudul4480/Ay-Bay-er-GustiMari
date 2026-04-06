@@ -33,6 +33,7 @@ import type { PieSectorDataItem } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
 import { TrendingUp, TrendingDown, Wallet, CreditCard, AlertTriangle, Trash2, PieChart as PieChartIcon, Edit2, ArrowRight, X, CalendarX, Lightbulb, Sparkles } from 'lucide-react';
 import TransactionForm from './TransactionForm';
+import NotificationBanner from './NotificationBanner';
 import { Transaction } from '../hooks/useTransactions';
 import { deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
@@ -270,6 +271,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         isHistoryMode && 'dashboard-history-root dashboard-history-pulse-wrap rounded-3xl'
       )}
     >
+      {/* Notification permission prompt — shown only when permission is 'default' or 'denied' */}
+      <NotificationBanner />
+
       {/* Month & year — drives all summary metrics and charts below */}
       <section
         className={cardShell(

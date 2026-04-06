@@ -7,6 +7,8 @@ import {
   doc,
   updateDoc,
   serverTimestamp,
+  query,
+  orderBy,
 } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { useCurrentMonthKey } from '../hooks/useCurrentMonthKey';
@@ -49,6 +51,8 @@ import {
   Clock,
   Bell,
   UserMinus,
+  Ghost,
+  Zap,
 } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { useLocalization } from '../contexts/LocalizationContext';
@@ -68,7 +72,12 @@ import {
 } from 'recharts';
 import type { PieSectorDataItem } from 'recharts';
 import { format } from 'date-fns';
-import { queueNotificationsForUsers } from '../lib/fcmUtils';
+import {
+  queueNotificationsForUsers,
+  queueNotificationForUser,
+  queueManualNotificationsForUsers,
+} from '../lib/fcmUtils';
+import { generatePersonalFinanceTip, type DirectNotifyUserType } from '../lib/geminiApi';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const ADMIN_EMAIL = 'chotan4480@gmail.com';
@@ -137,6 +146,22 @@ const escapeCsv = (val: string | number | undefined | null) => {
   if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 };
+
+/** Firestore transaction `date` → epoch ms (real-time list uses same shape as elsewhere in this file). */
+function txTimestampMs(t: { date?: unknown }): number | null {
+  const raw = t.date;
+  if (raw == null) return null;
+  const d =
+    typeof raw === 'object' && raw !== null && 'toDate' in raw && typeof (raw as { toDate: () => Date }).toDate === 'function'
+      ? (raw as { toDate: () => Date }).toDate()
+      : raw instanceof Date
+        ? raw
+        : null;
+  if (!d || isNaN(d.getTime())) return null;
+  return d.getTime();
+}
+
+const MS_PER_DAY = 86_400_000;
 
 // ── Category Users Modal ───────────────────────────────────────────────────────
 interface CategoryUser {
@@ -555,6 +580,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [loading, setLoading] = useState(true);
 
   // ── Filter state
+  const [leadSegmentTab, setLeadSegmentTab] = useState<'ghost' | 'irregular' | 'power'>('power');
   const [searchTerm, setSearchTerm] = useState('');
   const [incomeMin, setIncomeMin] = useState('');
   const [incomeMax, setIncomeMax] = useState('');
@@ -588,6 +614,26 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [inactiveSendError, setInactiveSendError] = useState<string | null>(null);
   const [inactiveSendDone, setInactiveSendDone] = useState(false);
 
+  // ── Per-user notify modal (notificationQueue → Cloud Function) ─────────────
+  const [notifyUser, setNotifyUser] = useState<any | null>(null);
+  const [notifyTitle, setNotifyTitle] = useState('Ay Bay Er GustiMari');
+  const [notifyMessage, setNotifyMessage] = useState('');
+  const [notifyBlogId, setNotifyBlogId] = useState('');
+  const [notifyBlogList, setNotifyBlogList] = useState<{ id: string; title: string }[]>([]);
+  const [notifySending, setNotifySending] = useState(false);
+  const [notifyError, setNotifyError] = useState<string | null>(null);
+  const [notifyAiLoading, setNotifyAiLoading] = useState(false);
+
+  // ── Global campaign (segment-targeted bulk notify) ───────────────────────────
+  const [globalCampaignOpen, setGlobalCampaignOpen] = useState(false);
+  const [globalCampaignSegment, setGlobalCampaignSegment] = useState<'all' | 'ghost' | 'irregular' | 'power'>('all');
+  const [globalCampaignTitle, setGlobalCampaignTitle] = useState('Ay Bay Er GustiMari');
+  const [globalCampaignMessage, setGlobalCampaignMessage] = useState('');
+  const [globalCampaignBlogId, setGlobalCampaignBlogId] = useState('');
+  const [globalCampaignBlogList, setGlobalCampaignBlogList] = useState<{ id: string; title: string }[]>([]);
+  const [globalCampaignSending, setGlobalCampaignSending] = useState(false);
+  const [globalCampaignError, setGlobalCampaignError] = useState<string | null>(null);
+
   // ── Firestore live listeners ─────────────────────────────────────────────────
   useEffect(() => {
     let usersReady = false, txReady = false;
@@ -614,6 +660,25 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     );
     return () => { unsubUsers(); unsubTx(); unsubIntelligence(); };
   }, []);
+
+  // Blogs list for Notify + Global Campaign modals
+  useEffect(() => {
+    if (!notifyUser && !globalCampaignOpen) return;
+    const qBlogs = query(collection(db, 'blogs'), orderBy('createdAt', 'desc'));
+    const unsub = onSnapshot(
+      qBlogs,
+      (snap) => {
+        const list = snap.docs.map((d) => ({
+          id: d.id,
+          title: String((d.data() as { title?: string }).title || 'Untitled'),
+        }));
+        setNotifyBlogList(list);
+        setGlobalCampaignBlogList(list);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'blogs'),
+    );
+    return () => unsub();
+  }, [notifyUser, globalCampaignOpen]);
 
   // ── Computed ─────────────────────────────────────────────────────────────────
 
@@ -846,6 +911,72 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     [users]
   );
 
+  /**
+   * Lead table segments (real-time from `transactions` via useMemo):
+   * - ghost: zero transaction documents for this user
+   * - power: ≥3 transactions in rolling last 7 days (Pro plan targets)
+   * - irregular: has transactions but fewer than 3 in last 7d (covers “silent 5d+” and light weekly users)
+   */
+  const leadGenSegment = useMemo(() => {
+    const now = Date.now();
+    const cutoff7 = now - 7 * MS_PER_DAY;
+
+    const totalByUser: Record<string, number> = {};
+    const count7: Record<string, number> = {};
+
+    transactions.forEach((t: any) => {
+      const uid = t.userId;
+      if (!uid) return;
+      const ms = txTimestampMs(t);
+      if (ms == null) return;
+      totalByUser[uid] = (totalByUser[uid] || 0) + 1;
+      if (ms >= cutoff7) count7[uid] = (count7[uid] || 0) + 1;
+    });
+
+    const byUid: Record<string, 'ghost' | 'power' | 'irregular'> = {};
+    const counts = { ghost: 0, power: 0, irregular: 0 };
+
+    visibleUsers.forEach((u) => {
+      const total = totalByUser[u.id] || 0;
+      const c7 = count7[u.id] || 0;
+      let seg: 'ghost' | 'power' | 'irregular';
+      if (total === 0) seg = 'ghost';
+      else if (c7 >= 3) seg = 'power';
+      else seg = 'irregular';
+      byUid[u.id] = seg;
+      counts[seg]++;
+    });
+
+    return { byUid, counts, totalByUser, count7 };
+  }, [transactions, visibleUsers]);
+
+  /** User IDs for global campaign by activity segment (same rules as Lead table tabs). */
+  const campaignTargetUserIds = useMemo(() => {
+    if (globalCampaignSegment === 'all') return visibleUsers.map((u) => u.id);
+    return visibleUsers
+      .filter((u) => leadGenSegment.byUid[u.id] === globalCampaignSegment)
+      .map((u) => u.id);
+  }, [visibleUsers, leadGenSegment, globalCampaignSegment]);
+
+  /** Direct Notify AI: Ghost / Irregular / Power + whole days since last transaction (all time). */
+  const directNotifyAiContext = useMemo(() => {
+    if (!notifyUser?.id) return null;
+    const uid = notifyUser.id;
+    const seg = leadGenSegment.byUid[uid];
+    const userType: DirectNotifyUserType =
+      seg === 'ghost' ? 'Ghost User' : seg === 'power' ? 'Power User' : 'Irregular User';
+    let lastMs: number | null = null;
+    for (const t of transactions) {
+      const tid = (t as { userId?: string }).userId;
+      if (tid !== uid) continue;
+      const ms = txTimestampMs(t as { date?: unknown });
+      if (ms != null && (lastMs === null || ms > lastMs)) lastMs = ms;
+    }
+    const daysSinceLastEntry =
+      lastMs === null ? null : Math.max(0, Math.floor((Date.now() - lastMs) / MS_PER_DAY));
+    return { userType, daysSinceLastEntry };
+  }, [notifyUser, leadGenSegment, transactions]);
+
   /** Ranked users enriched with all-time behavioral intelligence from user_intelligence collection. */
   const intelligenceRows = useMemo(() => {
     return rawUsers
@@ -916,6 +1047,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   }, [userIntelligenceMap, rawUsers]);
 
   const filteredUsers = useMemo(() => visibleUsers.filter((u) => {
+    if (leadGenSegment.byUid[u.id] !== leadSegmentTab) return false;
     const term = searchTerm.toLowerCase();
     if (term && !u.displayName?.toLowerCase().includes(term) && !u.email?.toLowerCase().includes(term)) return false;
     if (incomeMin && u.totalIncome < Number(incomeMin)) return false;
@@ -927,7 +1059,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     if (filterProfession && u.profession !== filterProfession) return false;
     if (filterTag && !u.tags.includes(filterTag)) return false;
     return true;
-  }), [visibleUsers, searchTerm, incomeMin, incomeMax, filterCategory, filterCategoryMin, filterProfession, filterTag]);
+  }), [visibleUsers, leadGenSegment, leadSegmentTab, searchTerm, incomeMin, incomeMax, filterCategory, filterCategoryMin, filterProfession, filterTag]);
 
   const tooltipStyle = useCallback((): React.CSSProperties => {
     const dark = document.documentElement.classList.contains('dark');
@@ -1040,6 +1172,105 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     }
   }, [inactiveSelectedUids, inactiveComposeTitle, inactiveComposeMsg]);
 
+  const openNotifyModal = useCallback((u: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setNotifyError(null);
+    setNotifyTitle('Ay Bay Er GustiMari');
+    setNotifyMessage('');
+    setNotifyBlogId('');
+    setNotifyUser(u);
+  }, []);
+
+  const handleSendNotify = useCallback(async () => {
+    if (!notifyUser) return;
+    if (!notifyTitle.trim() || !notifyMessage.trim()) {
+      setNotifyError('Please add a title and a message.');
+      return;
+    }
+    setNotifySending(true);
+    setNotifyError(null);
+    try {
+      await queueNotificationForUser(notifyUser.id, notifyTitle.trim(), notifyMessage.trim(), {
+        blogId: notifyBlogId.trim() || null,
+      });
+      setNotifyUser(null);
+    } catch (err: unknown) {
+      setNotifyError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setNotifySending(false);
+    }
+  }, [notifyUser, notifyTitle, notifyMessage, notifyBlogId]);
+
+  const handleAiPersonalTip = useCallback(async () => {
+    if (!notifyUser) return;
+    setNotifyAiLoading(true);
+    setNotifyError(null);
+    try {
+      const ctx = directNotifyAiContext;
+      const { title, message } = await generatePersonalFinanceTip({
+        displayName: notifyUser.displayName || 'বন্ধু',
+        profession: getProfessionLabel(notifyUser.profession),
+        topCategory: notifyUser.topCategory,
+        userType: ctx?.userType ?? 'Irregular User',
+        daysSinceLastEntry: ctx?.daysSinceLastEntry ?? null,
+      });
+      setNotifyTitle(title);
+      setNotifyMessage(message);
+    } catch (err: unknown) {
+      setNotifyError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setNotifyAiLoading(false);
+    }
+  }, [notifyUser, directNotifyAiContext]);
+
+  const openGlobalCampaign = useCallback(() => {
+    setGlobalCampaignError(null);
+    setGlobalCampaignTitle('Ay Bay Er GustiMari');
+    setGlobalCampaignMessage('');
+    setGlobalCampaignBlogId('');
+    setGlobalCampaignSegment('all');
+    setGlobalCampaignOpen(true);
+  }, []);
+
+  const handleGlobalCampaignSend = useCallback(async () => {
+    if (!globalCampaignTitle.trim() || !globalCampaignMessage.trim()) {
+      setGlobalCampaignError('Please add a title and a message.');
+      return;
+    }
+    if (campaignTargetUserIds.length === 0) {
+      setGlobalCampaignError('No users match this segment.');
+      return;
+    }
+    setGlobalCampaignSending(true);
+    setGlobalCampaignError(null);
+    try {
+      if (globalCampaignBlogId.trim()) {
+        await queueNotificationsForUsers(
+          globalCampaignBlogId.trim(),
+          campaignTargetUserIds,
+          globalCampaignTitle.trim(),
+          globalCampaignMessage.trim(),
+        );
+      } else {
+        await queueManualNotificationsForUsers(
+          campaignTargetUserIds,
+          globalCampaignTitle.trim(),
+          globalCampaignMessage.trim(),
+        );
+      }
+      setGlobalCampaignOpen(false);
+    } catch (err: unknown) {
+      setGlobalCampaignError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGlobalCampaignSending(false);
+    }
+  }, [
+    campaignTargetUserIds,
+    globalCampaignTitle,
+    globalCampaignMessage,
+    globalCampaignBlogId,
+  ]);
+
   // ── Loading ──────────────────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -1128,7 +1359,24 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex w-full flex-wrap gap-2 lg:w-auto lg:justify-end">
+          <motion.button
+            type="button"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={openGlobalCampaign}
+            aria-label="Open global campaign: notify users by segment"
+            className="flex w-full min-h-[3.25rem] items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 px-6 py-3.5 text-left shadow-xl shadow-orange-500/35 ring-2 ring-white/30 transition-all hover:brightness-110 sm:w-auto dark:ring-white/10"
+          >
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/20 ring-1 ring-white/25">
+              <Bell className="h-6 w-6 text-white" />
+            </span>
+            <span className="min-w-0 flex flex-col leading-tight">
+              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/90">Global campaign</span>
+              <span className="text-base font-black text-white">Notify all</span>
+              <span className="text-[11px] font-semibold text-white/85">Ghost, irregular, power, or everyone</span>
+            </span>
+          </motion.button>
           <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={exportFacebookAdsCsv}
             className="flex items-center gap-2 rounded-2xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-indigo-500/25 transition-all hover:bg-indigo-700">
             <Download className="h-4 w-4" /> Export Custom Audience (CSV)
@@ -1769,14 +2017,81 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       {/* ── Lead Generation Table ── */}
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
         className="neon-card overflow-hidden rounded-[2rem] border border-slate-200/80 dark:border-slate-700">
-        <div className="flex items-center justify-between border-b border-slate-100 p-5 dark:border-slate-700 sm:p-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-100 dark:bg-blue-900/40">
-              <Users className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+        <div className="space-y-4 border-b border-slate-100 p-5 dark:border-slate-700 sm:p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-100 dark:bg-blue-900/40">
+                <Users className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-800 dark:text-white">Lead Generation Table</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {filteredUsers.length} match{filteredUsers.length !== 1 ? 'es' : ''} · {leadGenSegment.counts[leadSegmentTab]} in this segment · {visibleUsers.length} total users
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="font-bold text-slate-800 dark:text-white">Lead Generation Table</h3>
-      <p className="text-xs text-slate-500 dark:text-slate-400">{filteredUsers.length} of {visibleUsers.length} users</p>
+          </div>
+
+          {/* Activity segment tabs (real-time from transactions) */}
+          <div className="flex flex-col gap-2">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">User activity</p>
+            <div className="flex flex-wrap gap-2">
+              {([
+                {
+                  id: 'ghost' as const,
+                  label: 'Ghost Users',
+                  hint: 'Signed up · 0 transactions',
+                  icon: Ghost,
+                  count: leadGenSegment.counts.ghost,
+                },
+                {
+                  id: 'irregular' as const,
+                  label: 'Irregular Users',
+                  hint: 'Has history · fewer than 3 entries in last 7 days',
+                  icon: Activity,
+                  count: leadGenSegment.counts.irregular,
+                },
+                {
+                  id: 'power' as const,
+                  label: 'Power Users',
+                  hint: 'Pro targets · ≥3 entries in last 7 days',
+                  icon: Zap,
+                  count: leadGenSegment.counts.power,
+                },
+              ]).map(({ id, label, hint, icon: Icon, count }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setLeadSegmentTab(id)}
+                  title={hint}
+                  className={cn(
+                    'flex min-w-0 flex-1 items-center gap-2.5 rounded-2xl border px-3 py-2.5 text-left transition-all sm:min-w-[10rem] sm:flex-none',
+                    leadSegmentTab === id
+                      ? 'border-indigo-500 bg-indigo-600 text-white shadow-lg shadow-indigo-500/25 dark:border-indigo-400'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-indigo-50/80 dark:border-slate-600 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:border-indigo-500/50 dark:hover:bg-slate-700/80'
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl',
+                      leadSegmentTab === id ? 'bg-white/20' : 'bg-slate-100 dark:bg-slate-700'
+                    )}
+                  >
+                    <Icon className={cn('h-4 w-4', leadSegmentTab === id ? 'text-white' : 'text-indigo-600 dark:text-indigo-400')} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-xs font-bold leading-tight">{label}</span>
+                    <span
+                      className={cn(
+                        'mt-0.5 block text-[10px] font-medium leading-snug',
+                        leadSegmentTab === id ? 'text-indigo-100' : 'text-slate-500 dark:text-slate-400'
+                      )}
+                    >
+                      {count} user{count !== 1 ? 's' : ''}
+                    </span>
+                  </span>
+                </button>
+              ))}
             </div>
           </div>
         </div>
@@ -1834,6 +2149,17 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                         type="button"
                         whileHover={{ scale: 1.07 }}
                         whileTap={{ scale: 0.93 }}
+                        onClick={(e) => openNotifyModal(u, e)}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-[11px] font-bold text-indigo-700 shadow-sm transition-all hover:border-indigo-300 hover:bg-indigo-100 dark:border-indigo-500/40 dark:bg-indigo-950/50 dark:text-indigo-200 dark:hover:bg-indigo-900/60"
+                        title="Send push & in-app notification"
+                      >
+                        <Bell className="h-3.5 w-3.5" />
+                        Notify
+                      </motion.button>
+                      <motion.button
+                        type="button"
+                        whileHover={{ scale: 1.07 }}
+                        whileTap={{ scale: 0.93 }}
                         onClick={(e) => {
                           e.stopPropagation();
                           void forceUserRelogin(u.id);
@@ -1854,9 +2180,313 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
               ))}
             </tbody>
           </table>
-          {filteredUsers.length === 0 && <p className="py-12 text-center text-sm text-slate-400">No users match the current filters.</p>}
+          {filteredUsers.length === 0 && (
+            <p className="py-12 text-center text-sm text-slate-400">
+              No users match the current filters or activity tab. Try another segment or clear filters.
+            </p>
+          )}
         </div>
       </motion.div>
+
+      {/* ── Notify user modal (glassmorphism) ── */}
+      <AnimatePresence>
+        {notifyUser && (
+          <motion.div
+            key={notifyUser.id}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+          >
+            <button
+              type="button"
+              className="absolute inset-0 bg-slate-900/50 backdrop-blur-md"
+              aria-label="Close"
+              onClick={() => setNotifyUser(null)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 16 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+              className="relative z-10 w-full max-w-lg overflow-hidden rounded-[1.75rem] border border-white/30 bg-white/70 p-6 shadow-[0_24px_80px_-12px_rgba(0,0,0,0.35)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-900/70 dark:shadow-[0_24px_80px_-12px_rgba(0,0,0,0.6)]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-indigo-500/10 via-transparent to-violet-500/10" />
+              <div className="relative">
+                <div className="mb-4 flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-500/15 ring-1 ring-indigo-500/25 dark:bg-indigo-400/10">
+                      <Bell className="h-5 w-5 text-indigo-600 dark:text-indigo-300" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-black text-slate-900 dark:text-white">Direct notify</h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        {notifyUser.displayName || 'User'} · {notifyUser.email}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setNotifyUser(null)}
+                    className="rounded-full p-2 text-slate-400 transition-colors hover:bg-slate-200/80 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-white"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                {notifyError && (
+                  <div className="mb-3 flex items-start gap-2 rounded-xl border border-rose-200/80 bg-rose-50/90 px-3 py-2 text-xs font-medium text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-200">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    {notifyError}
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Notification title
+                    </label>
+                    <input
+                      type="text"
+                      value={notifyTitle}
+                      onChange={(e) => setNotifyTitle(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none ring-indigo-500/30 placeholder:text-slate-400 focus:ring-2 dark:border-slate-600 dark:bg-slate-800/80 dark:text-white"
+                      placeholder="Short title"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        Message
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => void handleAiPersonalTip()}
+                        disabled={notifyAiLoading}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-violet-500/90 to-indigo-600 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-white shadow-md shadow-indigo-500/25 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {notifyAiLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                        ✨ AI Bengali tip
+                      </button>
+                    </div>
+                    <textarea
+                      value={notifyMessage}
+                      onChange={(e) => setNotifyMessage(e.target.value)}
+                      rows={4}
+                      className="w-full resize-y rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2.5 text-sm text-slate-800 outline-none ring-indigo-500/30 placeholder:text-slate-400 focus:ring-2 dark:border-slate-600 dark:bg-slate-800/80 dark:text-white"
+                      placeholder="বার্তা বাংলায় লিখুন, অথবা AI বাটনে টিপুন…"
+                    />
+                    <p className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
+                      AI uses segment ({directNotifyAiContext?.userType ?? '—'}
+                      {directNotifyAiContext?.daysSinceLastEntry != null
+                        ? ` · ${directNotifyAiContext.daysSinceLastEntry}d since last entry`
+                        : directNotifyAiContext?.userType === 'Ghost User'
+                          ? ' · no entries yet'
+                          : ''}
+                      ), profession, top category ({String(notifyUser.topCategory ?? '—')}). AI fills title (Bangla) + message (≤140 chars); tone varies for loan/debt, shopping/food, rent/utilities.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Push a blog (optional)
+                    </label>
+                    <select
+                      value={notifyBlogId}
+                      onChange={(e) => setNotifyBlogId(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/40 dark:border-slate-600 dark:bg-slate-800/80 dark:text-white"
+                    >
+                      <option value="">No blog — open app home when tapped</option>
+                      {notifyBlogList.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="mt-6 flex flex-wrap items-center justify-end gap-2 border-t border-slate-200/60 pt-4 dark:border-slate-600/60">
+                  <button
+                    type="button"
+                    onClick={() => setNotifyUser(null)}
+                    className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-600 transition-colors hover:bg-slate-200/80 dark:text-slate-300 dark:hover:bg-slate-700"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleSendNotify()}
+                    disabled={notifySending}
+                    className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-indigo-500/30 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {notifySending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    {notifySending ? 'Sending…' : 'Send'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Global campaign modal ── */}
+      <AnimatePresence>
+        {globalCampaignOpen && (
+          <motion.div
+            key="global-campaign"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[65] flex items-center justify-center p-4"
+          >
+            <button
+              type="button"
+              className="absolute inset-0 bg-slate-900/50 backdrop-blur-md"
+              aria-label="Close"
+              onClick={() => setGlobalCampaignOpen(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 16 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+              className="relative z-10 w-full max-w-lg overflow-hidden rounded-[1.75rem] border border-white/30 bg-white/75 p-6 shadow-[0_24px_80px_-12px_rgba(0,0,0,0.35)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-900/75"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-amber-500/10 via-transparent to-rose-500/10" />
+              <div className="relative">
+                <div className="mb-4 flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500/20 to-rose-500/20 ring-1 ring-amber-400/30">
+                      <Bell className="h-5 w-5 text-amber-600 dark:text-amber-300" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-black text-slate-900 dark:text-white">Global campaign</h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        Queue one notification per user · processed by Cloud Function
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setGlobalCampaignOpen(false)}
+                    className="rounded-full p-2 text-slate-400 transition-colors hover:bg-slate-200/80 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-white"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                {globalCampaignError && (
+                  <div className="mb-3 flex items-start gap-2 rounded-xl border border-rose-200/80 bg-rose-50/90 px-3 py-2 text-xs font-medium text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-200">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    {globalCampaignError}
+                  </div>
+                )}
+
+                <div className="mb-4">
+                  <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Target segment
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {([
+                      { id: 'all' as const, label: 'All Users', count: visibleUsers.length },
+                      { id: 'ghost' as const, label: 'Ghost Users', count: leadGenSegment.counts.ghost },
+                      { id: 'irregular' as const, label: 'Irregular', count: leadGenSegment.counts.irregular },
+                      { id: 'power' as const, label: 'Power Users', count: leadGenSegment.counts.power },
+                    ]).map(({ id, label, count }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setGlobalCampaignSegment(id)}
+                        className={cn(
+                          'rounded-xl border px-3 py-2 text-left text-xs font-bold transition-all',
+                          globalCampaignSegment === id
+                            ? 'border-amber-500 bg-amber-500 text-white shadow-md shadow-amber-500/30'
+                            : 'border-slate-200 bg-white/80 text-slate-700 hover:border-amber-300 dark:border-slate-600 dark:bg-slate-800/80 dark:text-slate-200',
+                        )}
+                      >
+                        {label}
+                        <span className="ml-1.5 font-black opacity-80">({count})</span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400">
+                    Recipients: {campaignTargetUserIds.length} user{campaignTargetUserIds.length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Title
+                    </label>
+                    <input
+                      type="text"
+                      value={globalCampaignTitle}
+                      onChange={(e) => setGlobalCampaignTitle(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-amber-500/40 dark:border-slate-600 dark:bg-slate-800/80 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Message
+                    </label>
+                    <textarea
+                      value={globalCampaignMessage}
+                      onChange={(e) => setGlobalCampaignMessage(e.target.value)}
+                      rows={4}
+                      className="w-full resize-y rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-amber-500/40 dark:border-slate-600 dark:bg-slate-800/80 dark:text-white"
+                      placeholder="Notification body for every recipient…"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Link to blog (optional)
+                    </label>
+                    <select
+                      value={globalCampaignBlogId}
+                      onChange={(e) => setGlobalCampaignBlogId(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-amber-500/40 dark:border-slate-600 dark:bg-slate-800/80 dark:text-white"
+                    >
+                      <option value="">No blog — open app home when tapped</option>
+                      {globalCampaignBlogList.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.title}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
+                      If you pick a blog, tap opens <code className="rounded bg-slate-200/80 px-1 dark:bg-slate-700">#/blog/:id</code>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-6 flex flex-wrap items-center justify-end gap-2 border-t border-slate-200/60 pt-4 dark:border-slate-600/60">
+                  <button
+                    type="button"
+                    onClick={() => setGlobalCampaignOpen(false)}
+                    className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-600 transition-colors hover:bg-slate-200/80 dark:text-slate-300 dark:hover:bg-slate-700"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleGlobalCampaignSend()}
+                    disabled={globalCampaignSending || campaignTargetUserIds.length === 0}
+                    className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-rose-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-rose-500/25 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {globalCampaignSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    {globalCampaignSending ? 'Queueing…' : 'Send campaign'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── User Detail Modal ── */}
       <AnimatePresence>

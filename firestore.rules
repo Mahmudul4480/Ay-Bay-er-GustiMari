@@ -112,5 +112,12 @@ service cloud.firestore {
       allow read: if isOwner(userId) || isAdmin();
       allow write: if isOwner(userId);
     }
+
+    // এই রুলটি match /databases/{database}/documents এর ভেতরে লিখুন
+    match /users/{userId}/inAppNotifications/{notificationId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null && request.auth.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+    }
   }
 }

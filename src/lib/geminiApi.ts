@@ -6,7 +6,15 @@
 // most common parse failure at the source.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import {
+  FinishReason,
+  GoogleGenerativeAI,
+  SchemaType,
+} from '@google/generative-ai';
+import type {
+  EnhancedGenerateContentResponse,
+  ResponseSchema,
+} from '@google/generative-ai';
 
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
 
@@ -257,5 +265,327 @@ export async function generateBlogContent(
   throw new Error(
     `All Gemini model candidates returned 404.\nTried:\n${errors.join('\n')}\n\n` +
       'Verify that VITE_GEMINI_API_KEY is valid and the Gemini API is enabled in your Google Cloud project.',
+  );
+}
+
+/** Prefer Gemini 1.5 Flash for admin Direct Notify; fall back if unavailable. */
+const TIP_MODEL_CANDIDATES = ['gemini-1.5-flash', 'gemini-2.5-flash', 'gemini-2.0-flash-lite', 'gemini-2.5-flash-lite'] as const;
+
+/** Forces valid `{ title, message }` JSON from the API (fixes broken / partial JSON strings). */
+const DIRECT_NOTIFY_RESPONSE_SCHEMA = {
+  type: SchemaType.OBJECT,
+  properties: {
+    title: {
+      type: SchemaType.STRING,
+      description: 'Bengali notification title from user spending category',
+    },
+    message: {
+      type: SchemaType.STRING,
+      description: 'Bengali personalized tip body',
+    },
+  },
+  required: ['title', 'message'],
+} as ResponseSchema;
+
+/**
+ * Prefer concatenating `parts[].text` (same as SDK getText) so JSON mode always yields the full payload.
+ */
+function getDirectNotifyRawText(response: EnhancedGenerateContentResponse): string {
+  const parts = response.candidates?.[0]?.content?.parts;
+  if (parts?.length) {
+    const joined = parts
+      .map((p) => (typeof p.text === 'string' ? p.text : ''))
+      .join('')
+      .replace(/^\uFEFF/, '')
+      .trim();
+    if (joined) return joined;
+  }
+  try {
+    return response.text().replace(/^\uFEFF/, '').trim();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const fr = response.candidates?.[0]?.finishReason;
+    throw new Error(
+      `No text in Gemini response (${fr ?? 'no candidate'}). ${msg}`,
+    );
+  }
+}
+
+export type DirectNotifyUserType = 'Ghost User' | 'Irregular User' | 'Power User';
+
+export type DirectNotifyCategoryBucket =
+  | 'loan_debt_installment'
+  | 'shopping_food_entertainment'
+  | 'rent_utilities'
+  | 'general';
+
+export interface PersonalFinanceTipParams {
+  displayName: string;
+  /** Human-readable profession label (e.g., Banker, Doctor). */
+  profession: string;
+  /** Where they spend most this month; omit or N/A if unknown. */
+  topCategory?: string;
+  userType: DirectNotifyUserType;
+  /**
+   * Whole days since their last transaction anywhere in the app.
+   * `null` means they have never logged an entry (Ghost).
+   */
+  daysSinceLastEntry: number | null;
+}
+
+export interface PersonalFinanceTipResult {
+  title: string;
+  message: string;
+}
+
+const TIP_TITLE_MAX_CHARS = 52;
+const TIP_MESSAGE_MAX_CHARS = 140;
+
+/** Maps app category labels (e.g. Loan Installment, Debt) into prompt buckets. */
+export function classifyDirectNotifyCategoryBucket(raw: string): DirectNotifyCategoryBucket {
+  const c = raw.trim().toLowerCase();
+  if (!c || c === 'n/a') return 'general';
+  if (
+    /\b(loan|debt|installment|instalment|emi|repayment|borrow|mortgage|overdraft|bnpl)\b/i.test(c) ||
+    /\b(credit\s*card)\b/i.test(c) ||
+    /লোন|ঋণ|কিস্তি|ডেবট/i.test(raw)
+  ) {
+    return 'loan_debt_installment';
+  }
+  if (
+    /\b(shop|shopping|food|grocery|restaurant|dining|entertain|movie|cinema|fashion|clothes|snack|coffee|takeout|online\s*order)\b/i.test(c) ||
+    /খাবার|শপিং|বিনোদন/i.test(raw)
+  ) {
+    return 'shopping_food_entertainment';
+  }
+  if (
+    /\b(rent|utility|utilities|electric|electricity|gas|water|internet|broadband|phone\s*bill|subscription)\b/i.test(c) ||
+    /ভাড়া|বিদ্যুৎ|ইউটিলিটি/i.test(raw)
+  ) {
+    return 'rent_utilities';
+  }
+  return 'general';
+}
+
+function bucketInstructions(bucket: DirectNotifyCategoryBucket): string {
+  switch (bucket) {
+    case 'loan_debt_installment':
+      return `CATEGORY WEIGHT — LOAN / DEBT / INSTALLMENT:
+- Title: if topCategory is "Loan Installment" (or equivalent), the JSON "title" must be natural Bangla such as "লোন ইন্সটলমেন্ট" or "ঋণের কিস্তি" (pick one; do not use English in title).
+- Message: one personalized tip — sympathetic (মানসিক চাপ বোঝা) but disciplined (সময়মতো কিস্তি, বাড়তি সুদ/জরিমানা এড়ানো); use displayName, profession, days inactive naturally. Never copy example lines verbatim.`;
+    case 'shopping_food_entertainment':
+      return `CATEGORY WEIGHT — SHOPPING / FOOD / ENTERTAINMENT:
+- Focus: impulse control; small spends adding up.
+- Tone vibe example: "পকেট খালি হওয়ার আগে একটু লাগাম টানুন।" (fresh wording each time).`;
+    case 'rent_utilities':
+      return `CATEGORY WEIGHT — RENT / UTILITIES:
+- Focus: essential budgeting for fixed bills; clarity, not guilt.`;
+    default:
+      return `CATEGORY WEIGHT — GENERAL:
+- Blend userType with one concrete angle from topCategory when known.`;
+  }
+}
+
+function buildDirectNotifyJsonPrompt(p: PersonalFinanceTipParams, bucket: DirectNotifyCategoryBucket): string {
+  const name = p.displayName.trim() || 'বন্ধু';
+  const prof = p.profession.trim() || 'পেশাজীবী';
+  const cat =
+    p.topCategory && String(p.topCategory).trim() && String(p.topCategory).trim() !== 'N/A'
+      ? String(p.topCategory).trim()
+      : 'তথ্য নেই';
+
+  const daysLine =
+    p.daysSinceLastEntry === null
+      ? 'কোনো হিসাবের এন্ট্রি এখনো নেই (Ghost / no entries yet).'
+      : `শেষ এন্ট্রির পর ${p.daysSinceLastEntry} দিন (days since last entry: ${p.daysSinceLastEntry}).`;
+
+  const behaviorHint =
+    p.userType === 'Ghost User'
+      ? `User type: Ghost — motivate first expense/income entry; explain হিসাব রাখার উপকার in a fresh way.`
+      : p.userType === 'Irregular User'
+        ? `User type: Irregular — gently reference inactivity (${p.daysSinceLastEntry ?? 'N/A'} days) and tie to topCategory.`
+        : `User type: Power User — praise consistency; add one sharp saving/mindset line (can combine with category bucket).`;
+
+  return `You are Gemini 1.5 Flash acting as a witty, smart Bengali financial advisor for "Ay-Bay-er-GustiMari" / "Ay Bay Er GustiMari". Friendly, sometimes slightly cheeky, always respectful. Standard/Chalito Bengali, conversational.
+
+User context:
+- displayName: ${name}
+- profession: ${prof}
+- topCategory (label from app, may be English): ${cat}
+- userType: ${p.userType}
+- Activity: ${daysLine}
+
+${bucketInstructions(bucket)}
+
+Also: ${behaviorHint}
+
+Return ONLY a raw JSON object. No markdown, no introductory text, no backticks. The format MUST be exactly:
+{
+  "title": "Bengali translation of the category",
+  "message": "The personalized tip in Bengali"
+}
+
+Hard rules:
+- Keys must be exactly "title" and "message" (English keys only).
+- "title": translate/summarize topCategory into natural Bangla. Max ${TIP_TITLE_MAX_CHARS} characters. If category unknown, use: আপনার আর্থিক আপডেট
+- "message": single notification body in Bengali. Max ${TIP_MESSAGE_MAX_CHARS} Unicode characters. One or two complete sentences; must end with । or ! or ? — no truncation mid-sentence; plan wording to fit.
+- Bengali only in the string values — no English sentences inside "title" or "message".`;
+}
+
+/**
+ * Remove markdown code fences (e.g. ```json … ```) and isolate the outermost `{ … }` before JSON.parse.
+ */
+function stripMarkdownCodeBlocksForDirectNotifyJson(raw: string): string {
+  let t = raw.trim();
+  t = t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  if (/^```/.test(t)) {
+    t = t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  }
+  const start = t.indexOf('{');
+  const end = t.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    t = t.slice(start, end + 1);
+  }
+  return t.trim();
+}
+
+function parsePersonalFinanceTipJson(raw: string, fallbackTitle: string): PersonalFinanceTipResult {
+  const cleaned = stripMarkdownCodeBlocksForDirectNotifyJson(raw);
+
+  let parsed: { title?: unknown; message?: unknown; titleBn?: unknown; messageBn?: unknown };
+  try {
+    parsed = JSON.parse(cleaned) as typeof parsed;
+  } catch {
+    try {
+      parsed = JSON.parse(sanitizeJson(cleaned)) as typeof parsed;
+    } catch {
+      console.error('[DirectNotify AI] JSON.parse failed. Raw model output:', raw);
+      const hint =
+        'Could not parse the AI response as JSON (invalid format or extra text). ' +
+        'Open the browser developer console (F12) to see the full raw response. ' +
+        `Snippet: ${raw.slice(0, 280)}${raw.length > 280 ? '…' : ''}`;
+      throw new Error(hint);
+    }
+  }
+
+  let title =
+    typeof parsed.title === 'string'
+      ? parsed.title.trim()
+      : typeof parsed.titleBn === 'string'
+        ? parsed.titleBn.trim()
+        : '';
+  let message =
+    typeof parsed.message === 'string'
+      ? parsed.message.trim()
+      : typeof parsed.messageBn === 'string'
+        ? parsed.messageBn.trim()
+        : '';
+
+  if (!message) {
+    throw new Error('AI returned an empty message.');
+  }
+
+  if (!title) title = fallbackTitle;
+
+  if (title.length > TIP_TITLE_MAX_CHARS) {
+    title = title.slice(0, TIP_TITLE_MAX_CHARS - 1).trim() + '…';
+  }
+
+  if (message.length > TIP_MESSAGE_MAX_CHARS) {
+    message = message.slice(0, TIP_MESSAGE_MAX_CHARS);
+    const sp = message.lastIndexOf(' ');
+    if (sp > TIP_MESSAGE_MAX_CHARS * 0.55) message = message.slice(0, sp).trim();
+    if (message.length > TIP_MESSAGE_MAX_CHARS) {
+      message = message.slice(0, TIP_MESSAGE_MAX_CHARS - 1).trim() + '…';
+    }
+  }
+
+  return { title, message };
+}
+
+/**
+ * Bengali notification title + body for admin Direct Notify — category-aware (loan/debt, shopping/food, rent/utilities).
+ * JSON mode; message capped at 140 characters.
+ */
+export async function generatePersonalFinanceTip(params: PersonalFinanceTipParams): Promise<PersonalFinanceTipResult> {
+  if (!GEMINI_API_KEY) {
+    throw new Error(
+      'Gemini API key is not configured. Add VITE_GEMINI_API_KEY to your .env file.',
+    );
+  }
+
+  const catRaw =
+    params.topCategory && String(params.topCategory).trim() && String(params.topCategory).trim() !== 'N/A'
+      ? String(params.topCategory).trim()
+      : '';
+  const bucket = classifyDirectNotifyCategoryBucket(catRaw);
+  const fallbackTitle = 'আপনার আর্থিক আপডেট';
+
+  const prompt = buildDirectNotifyJsonPrompt(params, bucket);
+
+  const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+  const errors: string[] = [];
+
+  const baseTipConfig = {
+    responseMimeType: 'application/json' as const,
+    temperature: 0.78,
+    topP: 0.9,
+    maxOutputTokens: 1024,
+  };
+
+  for (const modelName of TIP_MODEL_CANDIDATES) {
+    try {
+      const run = async (useSchema: boolean) => {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: useSchema
+            ? { ...baseTipConfig, responseSchema: DIRECT_NOTIFY_RESPONSE_SCHEMA }
+            : baseTipConfig,
+        });
+        const result = await model.generateContent(prompt);
+        const response = result.response;
+        const cand = response.candidates?.[0];
+        const raw = getDirectNotifyRawText(response);
+        if (!raw) {
+          const fr = cand?.finishReason ?? 'unknown';
+          throw new Error(
+            `Gemini returned empty output (finishReason: ${fr}). Try again or pick another model.`,
+          );
+        }
+        if (cand?.finishReason === FinishReason.MAX_TOKENS) {
+          console.warn(
+            `[DirectNotify AI] ${modelName} hit MAX_TOKENS; output may be truncated.`,
+          );
+        }
+        return parsePersonalFinanceTipJson(raw, fallbackTitle);
+      };
+
+      try {
+        return await run(true);
+      } catch (first: unknown) {
+        const msg = first instanceof Error ? first.message : String(first);
+        if (
+          /responseSchema|schema|invalid argument|400|unsupported/i.test(msg) &&
+          !/parse|JSON|empty/i.test(msg)
+        ) {
+          return await run(false);
+        }
+        throw first;
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('429') || /quota/i.test(msg)) {
+        throw new Error('Gemini API quota exceeded (429). Please wait and try again.');
+      }
+      if (msg.includes('404') || /not found/i.test(msg)) {
+        errors.push(`${modelName}: unavailable`);
+        continue;
+      }
+      throw new Error(`Gemini: ${msg.slice(0, 400)}`);
+    }
+  }
+
+  throw new Error(
+    `No Gemini model available for tips. Tried: ${TIP_MODEL_CANDIDATES.join(', ')}`,
   );
 }

@@ -5,7 +5,7 @@ import { TransactionFeedbackProvider } from './contexts/TransactionFeedbackConte
 import { TransactionsProvider } from './hooks/useTransactions';
 import { MonthSelectionProvider } from './contexts/MonthSelectionContext';
 import { loginWithGoogle, logout, isInAppBrowser, isConfigValid } from './firebaseConfig';
-import { LogOut, LayoutDashboard, CreditCard, Settings, Plus, Menu, X, Sun, Moon, AlertTriangle, Users, ArrowLeft, Home, Megaphone, BookOpen, Lightbulb } from 'lucide-react';
+import { LogOut, LayoutDashboard, CreditCard, Settings, Plus, Menu, X, Sun, Moon, AlertTriangle, ArrowLeft, Home, BookOpen, Lightbulb, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 import Dashboard from './pages/Dashboard';
@@ -16,12 +16,12 @@ import SettingsPage from './components/SettingsPage';
 import Onboarding from './components/Onboarding';
 import ProfessionSelector from './components/ProfessionSelector';
 import AdminDashboard from './pages/AdminDashboard';
-import AdminEngagement from './pages/AdminEngagement';
 import AdminBlogCreator from './pages/AdminBlogCreator';
 import BlogPage from './pages/BlogPage';
 import SmartTipsList from './components/SmartTipsList';
 import WelcomeOverlay from './components/WelcomeOverlay';
-import { useFcmToken } from './hooks/useFcmToken';
+import { useNotifications } from './hooks/useNotifications';
+import NotificationBar from './components/NotificationBar';
 
 const ADMIN_EMAIL = 'chotan4480@gmail.com';
 const FORCE_RELOGIN_NOTICE_KEY = 'force-relogin-notice';
@@ -63,8 +63,11 @@ const AppContent: React.FC = () => {
   const { language, setLanguage, t } = useLocalization();
   const [activeTab, setActiveTab] = React.useState('dashboard');
 
-  // Register FCM token & foreground listener
-  useFcmToken();
+  const isAdminUser =
+    !!user && user.email === ADMIN_EMAIL && userProfile?.role === 'admin';
+
+  // Register SW, request permission, get FCM token, save to Firestore, foreground listener
+  useNotifications(user?.uid);
 
   // Blog deep-link routing
   const { blogId, closeBlog } = useBlogRoute();
@@ -323,24 +326,86 @@ const AppContent: React.FC = () => {
     return <Onboarding />;
   }
 
-  const isAdminUser = user?.email === ADMIN_EMAIL && userProfile?.role === 'admin';
+  type SidebarTab = { id: string; label: string; icon: React.ElementType; neon?: boolean };
 
-  const tabs: { id: string; label: string; icon: React.ElementType; neon?: boolean }[] = [
-    { id: 'dashboard', label: t('dashboard'), icon: LayoutDashboard },
+  const personalTabs: SidebarTab[] = [
+    {
+      id: 'dashboard',
+      label: language === 'bn' ? t('dashboard') : 'Dashboard (Personal)',
+      icon: LayoutDashboard,
+    },
     { id: 'transactions', label: t('transactions'), icon: CreditCard },
-    { id: 'smarttips', label: language === 'bn' ? 'আর্থিক টিপস' : 'Smart Tips', icon: Lightbulb, neon: true },
+    {
+      id: 'smarttips',
+      label: language === 'bn' ? 'আর্থিক টিপস' : 'Smart Tips',
+      icon: Lightbulb,
+      neon: true,
+    },
     { id: 'settings', label: t('settings'), icon: Settings },
   ];
 
-  if (isAdminUser) {
-    tabs.push({ id: 'admin', label: 'Analytics', icon: Users });
-    tabs.push({ id: 'engagement', label: 'Engage', icon: Megaphone });
-    tabs.push({ id: 'blogcreator', label: 'Blogs', icon: BookOpen });
-  }
+  const adminTabs: SidebarTab[] = isAdminUser
+    ? [
+        { id: 'admin', label: 'Admin Dashboard', icon: Users },
+        { id: 'blogcreator', label: 'Blogs', icon: BookOpen },
+      ]
+    : [];
 
   const goDashboard = () => {
     setActiveTab('dashboard');
     setIsSidebarOpen(false);
+  };
+
+  const renderSidebarTab = (tab: SidebarTab) => {
+    const isActive = activeTab === tab.id;
+    if (tab.neon) {
+      return (
+        <button
+          key={tab.id}
+          type="button"
+          onClick={() => {
+            setActiveTab(tab.id);
+            setIsSidebarOpen(false);
+          }}
+          className={cn(
+            'smart-tips-sidebar-btn relative w-full flex items-center gap-3 p-3 rounded-xl font-bold transition-all hover:scale-[1.03] active:scale-[0.97]',
+            isActive
+              ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-[0_0_20px_rgba(168,85,247,0.55)]'
+              : 'bg-gradient-to-r from-purple-50 to-indigo-50 text-purple-700 border border-purple-200/60 dark:from-purple-950/40 dark:to-indigo-950/40 dark:text-purple-300 dark:border-purple-700/40 hover:from-purple-100 hover:to-indigo-100 dark:hover:from-purple-900/50 dark:hover:to-indigo-900/50'
+          )}
+        >
+          <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
+            <span className="absolute inline-flex h-3 w-3 animate-ping rounded-full bg-purple-400 opacity-60" />
+            <tab.icon className="relative h-5 w-5" />
+          </span>
+          <span>{tab.label}</span>
+          {!isActive && (
+            <span className="ml-auto rounded-full bg-purple-500 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white">
+              NEW
+            </span>
+          )}
+        </button>
+      );
+    }
+    return (
+      <button
+        key={tab.id}
+        type="button"
+        onClick={() => {
+          setActiveTab(tab.id);
+          setIsSidebarOpen(false);
+        }}
+        className={cn(
+          'w-full flex items-center gap-3 p-3 rounded-xl font-medium transition-all',
+          isActive
+            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+            : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
+        )}
+      >
+        <tab.icon className="w-5 h-5 shrink-0" />
+        <span className="text-left">{tab.label}</span>
+      </button>
+    );
   };
 
   return (
@@ -348,7 +413,7 @@ const AppContent: React.FC = () => {
       {/* Mobile Header */}
       <header className="sticky top-0 z-40 flex items-center justify-between border-b border-slate-200 bg-white p-3 transition-colors dark:border-slate-700 dark:bg-slate-800 md:hidden">
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          {(activeTab === 'transactions' || activeTab === 'settings') && (
+          {(activeTab === 'transactions' || activeTab === 'settings' || activeTab === 'smarttips') && (
             <button
               type="button"
               onClick={goDashboard}
@@ -390,6 +455,7 @@ const AppContent: React.FC = () => {
             {isDarkMode ? <Sun className="w-5 h-5 text-amber-500" /> : <Moon className="w-5 h-5 text-blue-600" />}
             <span className="text-xs font-bold hidden sm:inline">{isDarkMode ? 'Light' : 'Dark'}</span>
           </button>
+          <NotificationBar userId={user.uid} />
           <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 text-slate-600 dark:text-slate-300">
             {isSidebarOpen ? <X /> : <Menu />}
           </button>
@@ -478,56 +544,26 @@ const AppContent: React.FC = () => {
                 </div>
               </button>
             </div>
-            <nav className="flex-1 px-4 space-y-2">
-              {tabs.map((tab) => {
-                const isActive = activeTab === tab.id;
-                if (tab.neon) {
-                  return (
-                    <button
-                      key={tab.id}
-                      onClick={() => { setActiveTab(tab.id); setIsSidebarOpen(false); }}
-                      className={cn(
-                        'smart-tips-sidebar-btn relative w-full flex items-center gap-3 p-3 rounded-xl font-bold transition-all hover:scale-[1.03] active:scale-[0.97]',
-                        isActive
-                          ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-[0_0_20px_rgba(168,85,247,0.55)]'
-                          : 'bg-gradient-to-r from-purple-50 to-indigo-50 text-purple-700 border border-purple-200/60 dark:from-purple-950/40 dark:to-indigo-950/40 dark:text-purple-300 dark:border-purple-700/40 hover:from-purple-100 hover:to-indigo-100 dark:hover:from-purple-900/50 dark:hover:to-indigo-900/50'
-                      )}
-                    >
-                      {/* Live ping dot */}
-                      <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
-                        <span className="absolute inline-flex h-3 w-3 animate-ping rounded-full bg-purple-400 opacity-60" />
-                        <tab.icon className="relative h-5 w-5" />
-                      </span>
-                      <span>{tab.label}</span>
-                      {!isActive && (
-                        <span className="ml-auto rounded-full bg-purple-500 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white">
-                          NEW
-                        </span>
-                      )}
-                    </button>
-                  );
-                }
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => { setActiveTab(tab.id); setIsSidebarOpen(false); }}
-                    className={cn(
-                      "w-full flex items-center gap-3 p-3 rounded-xl font-medium transition-all",
-                      isActive
-                        ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                        : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700"
-                    )}
-                  >
-                    <tab.icon className="w-5 h-5" />
-                    {tab.label}
-                  </button>
-                );
-              })}
+            <nav className="flex-1 overflow-y-auto px-4 pb-2">
+              <p className="px-3 pb-2 pt-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                {language === 'bn' ? 'ব্যক্তিগত' : 'Personal'}
+              </p>
+              <div className="space-y-2">{personalTabs.map(renderSidebarTab)}</div>
+
+              {isAdminUser && adminTabs.length > 0 && (
+                <>
+                  <div className="my-3 border-t border-slate-100 dark:border-slate-700" aria-hidden />
+                  <p className="px-3 pb-2 text-[10px] font-bold uppercase tracking-wider text-violet-600 dark:text-violet-400">
+                    {language === 'bn' ? 'অ্যাডমিন' : 'Admin control'}
+                  </p>
+                  <div className="space-y-2">{adminTabs.map(renderSidebarTab)}</div>
+                </>
+              )}
             </nav>
             <div className="p-4 border-t border-slate-100 dark:border-slate-700">
               <div className="flex items-center gap-3 p-3 mb-4">
                 <img src={user.photoURL || ''} alt="" className="w-10 h-10 rounded-full border border-slate-200 dark:border-slate-600" />
-                <div className="overflow-hidden">
+                <div className="min-w-0 flex-1 overflow-hidden">
                   <p className="text-sm font-semibold text-slate-800 dark:text-white truncate">{user.displayName}</p>
                   <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{user.email}</p>
                 </div>
@@ -544,27 +580,49 @@ const AppContent: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Main Content */}
-      <main className="mx-auto w-full min-w-0 max-w-7xl flex-1 overflow-x-hidden p-3 pb-24 sm:p-4 md:p-8 md:pb-8">
-        {activeTab === 'dashboard' && <Dashboard onTabChange={setActiveTab} />}
+      {/* Desktop main area: sticky header + scrollable content */}
+      <div className="flex min-w-0 flex-1 flex-col">
+
+        {/* Desktop-only top header — hidden on mobile (mobile already has its own header) */}
+        <div className="hidden md:flex sticky top-0 z-40 items-center justify-between border-b border-slate-200 bg-white px-6 py-3 transition-colors dark:border-slate-700 dark:bg-slate-800">
+          <p className="text-sm font-semibold capitalize text-slate-500 dark:text-slate-400">
+            {activeTab === 'dashboard'
+              ? language === 'bn'
+                ? t('dashboard')
+                : 'Dashboard (Personal)'
+              : activeTab === 'transactions'
+                ? t('transactions')
+                : activeTab === 'smarttips'
+                  ? language === 'bn'
+                    ? 'আর্থিক টিপস'
+                    : 'Smart Tips'
+                  : activeTab === 'settings'
+                    ? t('settings')
+                    : activeTab === 'admin'
+                      ? 'Admin Dashboard'
+                      : activeTab === 'blogcreator'
+                        ? 'Blogs'
+                        : activeTab}
+          </p>
+          <NotificationBar userId={user.uid} />
+        </div>
+
+        {/* Main Content */}
+        <main className="mx-auto w-full min-w-0 max-w-7xl flex-1 overflow-x-hidden p-3 pb-24 sm:p-4 md:p-8 md:pb-8">
+          {activeTab === 'dashboard' && <Dashboard onTabChange={setActiveTab} />}
         {activeTab === 'transactions' && <TransactionList />}
         {activeTab === 'debts' && <DebtTracker />}
         {activeTab === 'smarttips' && <SmartTipsList onBack={() => setActiveTab('dashboard')} />}
         {activeTab === 'settings' && <SettingsPage />}
         {activeTab === 'admin' && isAdminUser && <AdminDashboard onBack={() => setActiveTab('dashboard')} />}
-        {activeTab === 'engagement' && isAdminUser && (
-          <AdminEngagement
-            currentUserEmail={user?.email ?? ''}
-            onBack={() => setActiveTab('dashboard')}
-          />
-        )}
         {activeTab === 'blogcreator' && isAdminUser && (
           <AdminBlogCreator
             currentUserEmail={user?.email ?? ''}
-            onBack={() => setActiveTab('dashboard')}
+            onBack={() => setActiveTab('admin')}
           />
         )}
-      </main>
+        </main>
+      </div>{/* end desktop main wrapper */}
 
       {/* Floating Add Button */}
       <motion.button

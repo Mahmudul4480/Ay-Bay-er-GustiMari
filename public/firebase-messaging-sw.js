@@ -1,6 +1,7 @@
 /* eslint-disable no-undef */
-importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js');
+// Keep versions in sync with `firebase` in package.json (mismatched SW/app SDK breaks FCM web).
+importScripts('https://www.gstatic.com/firebasejs/12.11.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/12.11.0/firebase-messaging-compat.js');
 
 firebase.initializeApp({
   apiKey: 'AIzaSyB0TpWdNba9OkLieali8mmvYvjTLw8qhYA',
