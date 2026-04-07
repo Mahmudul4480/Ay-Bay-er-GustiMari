@@ -84,6 +84,8 @@ export interface UserProfile {
   hideFromAdminList?: boolean;
   adminRemovedAt?: unknown;
   createdAt?: unknown;
+  /** Last dashboard/session activity; used for Welcome Back (>= 7 days inactive). */
+  lastActive?: unknown;
 }
 
 const AuthContext = createContext<AuthContextType>({ user: null, loading: true, userProfile: null });
@@ -150,6 +152,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               UNIVERSAL_EXPENSE_CATEGORIES,
               initialCats.expense,
             ]);
+            // merge: true — avoids wiping fields if this races with onboarding/profession updates.
+            // Omit phoneNumber here so a late write never stamps '' over a saved number.
             const newProfile: Record<string, unknown> = {
               uid: user.uid,
               displayName: user.displayName,
@@ -157,7 +161,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               photoURL: user.photoURL,
               language: 'en',
               budgetLimit: 0,
-              phoneNumber: '',
               profession: '',
               onboardingCompleted: false,
               familyMembers: ['Self'],
@@ -166,7 +169,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               createdAt: serverTimestamp(),
               role: user.email === 'chotan4480@gmail.com' ? 'admin' : 'user',
             };
-            setDoc(userDocRef, newProfile).catch(err => {
+            setDoc(userDocRef, newProfile, { merge: true }).catch((err) => {
               handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}`);
             });
           }

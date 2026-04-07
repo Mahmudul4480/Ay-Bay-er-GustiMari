@@ -149,8 +149,10 @@ exports.processNotificationQueue = (0, firestore_1.onDocumentCreated)({
                 body: message,
                 icon: "https://i.postimg.cc/K8yGqVdy/logo-png.png",
                 badge: "https://i.postimg.cc/K8yGqVdy/logo-png.png",
-                // Show notification even when tab is focused
-                requireInteraction: false,
+                renotify: true,
+                requireInteraction: true,
+                // Vibration pattern (ms) for supported browsers / devices
+                vibrate: [200, 100, 200],
             },
             fcmOptions: {
                 // Opens this URL when the user taps the notification
@@ -168,6 +170,10 @@ exports.processNotificationQueue = (0, firestore_1.onDocumentCreated)({
                 body: message,
                 clickAction: "FLUTTER_NOTIFICATION_CLICK",
                 icon: "ic_launcher",
+                channelId: "high_importance_channel",
+                sound: "default",
+                vibrateTimingsMillis: [0, 500, 200, 500],
+                notificationCount: 1,
             },
         },
         apns: {
@@ -179,6 +185,7 @@ exports.processNotificationQueue = (0, firestore_1.onDocumentCreated)({
                     alert: { title, body: message },
                     sound: "default",
                     badge: 1,
+                    contentAvailable: true,
                 },
             },
         },

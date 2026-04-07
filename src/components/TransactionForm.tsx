@@ -155,181 +155,277 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, initialType,
 
   const familyMembers = userProfile?.familyMembers || ['Self'];
 
+  const fieldPad = 'p-3 sm:p-4 min-h-[44px]';
+  const stackGap = 'space-y-2 sm:space-y-3';
+  const gridGap = 'grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-6';
+
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/55 p-3 pt-4 backdrop-blur-sm sm:items-center sm:p-4 sm:pt-4"
+      style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}
+    >
       <motion.div
-        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        initial={{ opacity: 0, scale: 0.96, y: 16 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.9, y: 20 }}
-        className="bg-white dark:bg-slate-800 w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden transition-colors"
+        exit={{ opacity: 0, scale: 0.96, y: 16 }}
+        className={cn(
+          'flex max-h-[min(90vh,100dvh)] w-full max-w-lg flex-col overflow-hidden rounded-[1.75rem] transition-colors',
+          'border border-indigo-400/35 bg-white/95 shadow-[0_0_0_1px_rgba(99,102,241,0.2),0_0_48px_-8px_rgba(99,102,241,0.35),0_25px_50px_-12px_rgba(0,0,0,0.35)]',
+          'backdrop-blur-md dark:border-indigo-500/30 dark:bg-slate-900/95'
+        )}
       >
-        <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-slate-800 dark:text-white">{t('addTransaction')}</h2>
-          <button onClick={onClose} className="p-2 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-full text-slate-400">
-            <X className="w-6 h-6" />
+        {/* Sticky header — stays visible while body scrolls */}
+        <div className="sticky top-0 z-20 flex shrink-0 items-center justify-between gap-3 border-b border-indigo-200/40 bg-white/85 px-4 py-3 backdrop-blur-md dark:border-indigo-500/30 dark:bg-slate-900/90">
+          <h2 className="min-w-0 flex-1 text-lg font-black leading-tight tracking-tight text-slate-900 dark:text-white sm:text-2xl">
+            {t('addTransaction')}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-slate-500 transition hover:bg-slate-100 dark:hover:bg-slate-800"
+            aria-label={t('cancel')}
+          >
+            <X className="h-6 w-6" />
           </button>
         </div>
 
         {error && (
-          <div className="mx-8 mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 rounded-2xl flex items-center gap-3 text-red-600 dark:text-red-400 text-sm">
-            <AlertTriangle className="w-5 h-5 flex-shrink-0" />
-            <p className="font-medium">{error}</p>
+          <div className="shrink-0 border-b border-red-200/50 bg-red-50/90 px-4 py-3 dark:border-red-900/40 dark:bg-red-950/40">
+            <div className="flex items-start gap-2 rounded-xl border border-red-200/80 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <p className="font-medium">{error}</p>
+            </div>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="p-8 space-y-6">
-          {type === 'debt_repayment' ? (
-            <div className="flex p-1 bg-teal-50 dark:bg-teal-900/20 rounded-2xl border border-teal-100 dark:border-teal-800">
-              <div className="flex-1 py-3 rounded-xl font-semibold text-center text-teal-700 dark:text-teal-300">
-                {t('debt_repayment')}
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          {/* Scrollable fields */}
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2 sm:px-6 sm:py-4">
+            <div className={cn(stackGap, 'pb-2')}>
+              {type === 'debt_repayment' ? (
+                <div className="flex rounded-2xl border border-teal-200/80 bg-teal-50/90 p-1 dark:border-teal-800 dark:bg-teal-900/25">
+                  <div className="flex-1 rounded-xl py-2.5 text-center text-sm font-semibold text-teal-800 dark:text-teal-300 sm:py-3">
+                    {t('debt_repayment')}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex rounded-2xl bg-slate-100/90 p-1 dark:bg-slate-800/80">
+                  <button
+                    type="button"
+                    onClick={() => setType('income')}
+                    className={cn(
+                      'flex-1 rounded-xl py-2.5 text-sm font-semibold transition-all sm:py-3',
+                      type === 'income'
+                        ? 'bg-white text-green-600 shadow-sm dark:bg-slate-600 dark:text-green-400'
+                        : 'text-slate-500 dark:text-slate-400'
+                    )}
+                  >
+                    {t('income')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setType('expense')}
+                    className={cn(
+                      'flex-1 rounded-xl py-2.5 text-sm font-semibold transition-all sm:py-3',
+                      type === 'expense'
+                        ? 'bg-white text-red-600 shadow-sm dark:bg-slate-600 dark:text-red-400'
+                        : 'text-slate-500 dark:text-slate-400'
+                    )}
+                  >
+                    {t('expense')}
+                  </button>
+                </div>
+              )}
+
+              <div className={gridGap}>
+                <div className={stackGap}>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400 sm:text-sm sm:normal-case sm:tracking-normal">
+                    {t('amount')}
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    required
+                    value={amount}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const sanitized = sanitizeDecimal(val);
+                      setAmount(sanitized);
+                    }}
+                    placeholder="0.00"
+                    className={cn(
+                      fieldPad,
+                      'w-full rounded-2xl border border-slate-200 bg-slate-50 text-lg font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white'
+                    )}
+                  />
+                </div>
+                <div className={stackGap}>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400 sm:text-sm sm:normal-case sm:tracking-normal">
+                    {t('category')}
+                  </label>
+                  {!isAddingCategory ? (
+                    <select
+                      required
+                      value={category}
+                      onChange={(e) => {
+                        if (e.target.value === 'ADD_NEW') setIsAddingCategory(true);
+                        else setCategory(e.target.value);
+                      }}
+                      className={cn(
+                        fieldPad,
+                        'w-full rounded-2xl border border-slate-200 bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white'
+                      )}
+                    >
+                      <option value="">Select Category</option>
+                      {categories.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                      <option value="ADD_NEW" className="font-bold text-blue-600 dark:text-blue-400">
+                        + {t('addCategory')}
+                      </option>
+                    </select>
+                  ) : (
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        required
+                        value={newCategory}
+                        onChange={(e) => setNewCategory(e.target.value)}
+                        placeholder="New Category Name"
+                        className={cn(
+                          fieldPad,
+                          'min-w-0 flex-1 rounded-2xl border border-slate-200 bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white'
+                        )}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingCategory(false)}
+                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-slate-400"
+                      >
+                        <X className="h-5 w-5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className={gridGap}>
+                <div className={stackGap}>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400 sm:text-sm sm:normal-case sm:tracking-normal">
+                    {t('date')}
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    className={cn(
+                      fieldPad,
+                      'w-full rounded-2xl border border-slate-200 bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white'
+                    )}
+                  />
+                </div>
+                <div className={stackGap}>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400 sm:text-sm sm:normal-case sm:tracking-normal">
+                    {t('familyMember')}
+                  </label>
+                  {!isAddingMember ? (
+                    <select
+                      value={familyMember}
+                      onChange={(e) => {
+                        if (e.target.value === 'ADD_NEW') setIsAddingMember(true);
+                        else setFamilyMember(e.target.value);
+                      }}
+                      className={cn(
+                        fieldPad,
+                        'w-full rounded-2xl border border-slate-200 bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white'
+                      )}
+                    >
+                      {familyMembers.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                      <option value="ADD_NEW" className="font-bold text-blue-600 dark:text-blue-400">
+                        + {t('addMember')}
+                      </option>
+                    </select>
+                  ) : (
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        required
+                        value={newMember}
+                        onChange={(e) => setNewMember(e.target.value)}
+                        placeholder="Member Name"
+                        className={cn(
+                          fieldPad,
+                          'min-w-0 flex-1 rounded-2xl border border-slate-200 bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white'
+                        )}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingMember(false)}
+                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-slate-400"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className={stackGap}>
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400 sm:text-sm sm:normal-case sm:tracking-normal">
+                  {t('note')}
+                </label>
+                <textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Add a note..."
+                  className={cn(
+                    fieldPad,
+                    'h-20 w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white sm:h-24'
+                  )}
+                />
               </div>
             </div>
-          ) : (
-            <div className="flex p-1 bg-slate-100 dark:bg-slate-700 rounded-2xl">
+          </div>
+
+          {/* Sticky footer — Save always reachable */}
+          <div
+            className="sticky bottom-0 z-20 shrink-0 border-t border-indigo-200/40 bg-white/90 px-4 py-3 backdrop-blur-md dark:border-indigo-500/25 dark:bg-slate-900/85"
+            style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
+          >
+            <div className="flex gap-3">
               <button
                 type="button"
-                onClick={() => setType('income')}
-                className={cn(
-                  "flex-1 py-3 rounded-xl font-semibold transition-all",
-                  type === 'income' ? "bg-white dark:bg-slate-600 text-green-600 dark:text-green-400 shadow-sm" : "text-slate-500 dark:text-slate-400"
-                )}
+                onClick={onClose}
+                className="flex min-h-[48px] flex-1 items-center justify-center rounded-2xl font-bold text-slate-600 transition-all hover:bg-slate-100 active:scale-[0.98] dark:text-slate-300 dark:hover:bg-slate-800"
               >
-                {t('income')}
+                {t('cancel')}
               </button>
               <button
-                type="button"
-                onClick={() => setType('expense')}
+                type="submit"
+                disabled={isSubmitting}
                 className={cn(
-                  "flex-1 py-3 rounded-xl font-semibold transition-all",
-                  type === 'expense' ? "bg-white dark:bg-slate-600 text-red-600 dark:text-red-400 shadow-sm" : "text-slate-500 dark:text-slate-400"
+                  'flex min-h-[48px] flex-[1.15] items-center justify-center gap-2 rounded-2xl font-bold text-white transition-all active:scale-[0.98]',
+                  'bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600',
+                  'shadow-[0_4px_0_rgb(67,56,163),0_12px_32px_rgba(99,102,241,0.45)]',
+                  'ring-2 ring-indigo-400/40 ring-offset-2 ring-offset-white dark:ring-offset-slate-900',
+                  'hover:brightness-110 disabled:opacity-60'
                 )}
               >
-                {t('expense')}
+                {isSubmitting ? (
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                ) : (
+                  <Save className="h-5 w-5" />
+                )}
+                {t('save')}
               </button>
             </div>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('amount')}</label>
-              <input
-                type="text"
-                inputMode="decimal"
-                required
-                value={amount}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  const sanitized = sanitizeDecimal(val);
-                  console.log('Amount Input:', { val, sanitized });
-                  setAmount(sanitized);
-                }}
-                placeholder="0.00"
-                className="w-full p-4 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-lg font-bold dark:text-white"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('category')}</label>
-              {!isAddingCategory ? (
-                <select
-                  required
-                  value={category}
-                  onChange={(e) => {
-                    if (e.target.value === 'ADD_NEW') setIsAddingCategory(true);
-                    else setCategory(e.target.value);
-                  }}
-                  className="w-full p-4 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none dark:text-white"
-                >
-                  <option value="">Select Category</option>
-                  {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                  <option value="ADD_NEW" className="text-blue-600 dark:text-blue-400 font-bold">+ {t('addCategory')}</option>
-                </select>
-              ) : (
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    required
-                    value={newCategory}
-                    onChange={(e) => setNewCategory(e.target.value)}
-                    placeholder="New Category Name"
-                    className="flex-1 p-4 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none dark:text-white"
-                  />
-                  <button type="button" onClick={() => setIsAddingCategory(false)} className="p-4 text-slate-400">
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('date')}</label>
-              <input
-                type="date"
-                required
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="w-full p-4 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none dark:text-white"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('familyMember')}</label>
-              {!isAddingMember ? (
-                <select
-                  value={familyMember}
-                  onChange={(e) => {
-                    if (e.target.value === 'ADD_NEW') setIsAddingMember(true);
-                    else setFamilyMember(e.target.value);
-                  }}
-                  className="w-full p-4 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none dark:text-white"
-                >
-                  {familyMembers.map(m => <option key={m} value={m}>{m}</option>)}
-                  <option value="ADD_NEW" className="text-blue-600 dark:text-blue-400 font-bold">+ {t('addMember')}</option>
-                </select>
-              ) : (
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    required
-                    value={newMember}
-                    onChange={(e) => setNewMember(e.target.value)}
-                    placeholder="Member Name"
-                    className="flex-1 p-4 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none dark:text-white"
-                  />
-                  <button type="button" onClick={() => setIsAddingMember(false)} className="p-4 text-slate-400">
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('note')}</label>
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="Add a note..."
-              className="w-full p-4 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none h-24 resize-none dark:text-white"
-            />
-          </div>
-
-          <div className="flex gap-4 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 py-4 px-6 rounded-2xl font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all active:scale-95"
-            >
-              {t('cancel')}
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="flex-1 py-4 px-6 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none active:scale-95 flex items-center justify-center gap-2"
-            >
-              {isSubmitting ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Save className="w-5 h-5" />}
-              {t('save')}
-            </button>
           </div>
         </form>
       </motion.div>

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocalization } from '../contexts/LocalizationContext';
 import { db } from '../firebaseConfig';
-import { doc, updateDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import { Phone, TrendingUp, TrendingDown, Plus, Trash2, ArrowRight, CheckCircle, AlertTriangle } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -12,11 +12,19 @@ import {
   mergeUniqueCategoryLists,
 } from '../lib/professionData';
 
+const ONBOARDING_PHONE_DRAFT_KEY = 'onboarding-phone-draft';
+
 const Onboarding: React.FC = () => {
   const { user, userProfile } = useAuth();
   const { t, language } = useLocalization();
   const [step, setStep] = useState(1);
-  const [phoneNumber, setPhoneNumber] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState(() => {
+    try {
+      return sessionStorage.getItem(ONBOARDING_PHONE_DRAFT_KEY) ?? '';
+    } catch {
+      return '';
+    }
+  });
   const [fixedIncomes, setFixedIncomes] = useState<{ name: string; amount: string }[]>([]);
   const [fixedExpenses, setFixedExpenses] = useState<{ name: string; amount: string }[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -32,6 +40,15 @@ const Onboarding: React.FC = () => {
 
   const addExpense = () => setFixedExpenses([...fixedExpenses, { name: '', amount: '' }]);
   const removeExpense = (index: number) => setFixedExpenses(fixedExpenses.filter((_, i) => i !== index));
+
+  React.useEffect(() => {
+    try {
+      sessionStorage.setItem(ONBOARDING_PHONE_DRAFT_KEY, phoneNumber);
+    } catch {
+      /* ignore */
+    }
+  }, [phoneNumber]);
+
   const updateExpense = (index: number, field: 'name' | 'amount', value: string) => {
     const newExpenses = [...fixedExpenses];
     newExpenses[index][field] = value;
@@ -51,13 +68,26 @@ const Onboarding: React.FC = () => {
       const newIncomeCategories = mergeUniqueCategoryLists([base.income, extraIncome]);
       const newExpenseCategories = mergeUniqueCategoryLists([base.expense, extraExpense]);
 
-      // 2. Update user profile
-      await updateDoc(doc(db, 'users', user.uid), {
-        phoneNumber,
-        onboardingCompleted: true,
-        incomeCategories: newIncomeCategories,
-        expenseCategories: newExpenseCategories
-      });
+      // 2. Merge into user profile (never full-replace — survives races with Auth bootstrap)
+      const trimmedPhone = phoneNumber.trim();
+      await setDoc(
+        doc(db, 'users', user.uid),
+        {
+          phoneNumber: trimmedPhone,
+          onboardingCompleted: true,
+          incomeCategories: newIncomeCategories,
+          expenseCategories: newExpenseCategories,
+        },
+        { merge: true }
+      );
+      try {
+        sessionStorage.removeItem(ONBOARDING_PHONE_DRAFT_KEY);
+      } catch {
+        /* ignore */
+      }
+      console.log(
+        `Success: Phone number ${trimmedPhone || '(empty)'} saved for user ${user.uid}`
+      );
 
       // 3. Add fixed incomes
       for (const income of fixedIncomes) {

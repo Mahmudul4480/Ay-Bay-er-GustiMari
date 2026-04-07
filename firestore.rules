@@ -113,9 +113,18 @@ service cloud.firestore {
       allow write: if isOwner(userId);
     }
 
-    // এই রুলটি match /databases/{database}/documents এর ভেতরে লিখুন
+    // In-app bell (user may create e.g. client-side "Welcome Back"; admin CF also writes)
     match /users/{userId}/inAppNotifications/{notificationId} {
       allow read: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null && request.auth.uid == userId
+        && request.resource.data.title is string
+        && request.resource.data.body is string
+        && request.resource.data.url is string
+        && request.resource.data.read == false
+        && request.resource.data.blogId is string
+        && request.resource.data.createdAt == request.time
+        && (!request.resource.data.keys().hasAny(['category'])
+            || request.resource.data.category is string);
       allow update: if request.auth != null && request.auth.uid == userId
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
     }

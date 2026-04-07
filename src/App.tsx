@@ -14,6 +14,7 @@ import TransactionList from './components/TransactionList';
 import DebtTracker from './components/DebtTracker';
 import SettingsPage from './components/SettingsPage';
 import Onboarding from './components/Onboarding';
+import CollectPhonePrompt from './components/CollectPhonePrompt';
 import ProfessionSelector from './components/ProfessionSelector';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminBlogCreator from './pages/AdminBlogCreator';
@@ -22,6 +23,7 @@ import SmartTipsList from './components/SmartTipsList';
 import WelcomeOverlay from './components/WelcomeOverlay';
 import { useNotifications } from './hooks/useNotifications';
 import NotificationBar from './components/NotificationBar';
+import InstallPWA from './components/InstallPWA';
 
 const ADMIN_EMAIL = 'chotan4480@gmail.com';
 const FORCE_RELOGIN_NOTICE_KEY = 'force-relogin-notice';
@@ -30,6 +32,14 @@ function needsProfession(profile: { profession?: string } | null): boolean {
   if (!profile) return true;
   const p = profile.profession;
   return p == null || String(p).trim() === '';
+}
+
+/** Onboarding সম্পন্ন কিন্তু ফায়ারস্টোরে ফোন নেই (পুরনো বাগ / খালি ঐচ্ছিক ছেড়ে দেওয়া) */
+function needsPhoneNumber(
+  profile: { onboardingCompleted?: boolean; phoneNumber?: string | null } | null
+): boolean {
+  if (!profile?.onboardingCompleted) return false;
+  return !String(profile.phoneNumber ?? '').trim();
 }
 
 // ── Hash-based blog routing ──────────────────────────────────────────────────
@@ -324,6 +334,10 @@ const AppContent: React.FC = () => {
 
   if (userProfile && !userProfile.onboardingCompleted) {
     return <Onboarding />;
+  }
+
+  if (userProfile && needsPhoneNumber(userProfile)) {
+    return <CollectPhonePrompt />;
   }
 
   type SidebarTab = { id: string; label: string; icon: React.ElementType; neon?: boolean };
@@ -654,6 +668,7 @@ export default function App() {
           <MonthSelectionProvider>
             <TransactionsProvider>
               <AppContent />
+              <InstallPWA />
             </TransactionsProvider>
           </MonthSelectionProvider>
         </TransactionFeedbackProvider>

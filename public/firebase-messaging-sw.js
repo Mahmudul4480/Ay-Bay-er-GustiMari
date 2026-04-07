@@ -31,6 +31,8 @@ messaging.onBackgroundMessage((payload) => {
     badge: APP_ICON,
     tag: data.blogId || 'gustimari-notification',
     renotify: true,
+    requireInteraction: true,
+    vibrate: [200, 100, 200],
     data: { url },
     actions: [
       { action: 'open', title: 'হিসাব দেখুন' },

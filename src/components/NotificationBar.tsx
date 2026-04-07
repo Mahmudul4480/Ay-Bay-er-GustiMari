@@ -22,7 +22,7 @@ import {
   type Timestamp,
 } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
-import { Bell, BellOff, CheckCheck, Sparkles, X } from 'lucide-react';
+import { Bell, BellOff, CheckCheck, Heart, Sparkles, X } from 'lucide-react';
 import { db } from '../firebaseConfig';
 import { cn } from '../lib/utils';
 
@@ -36,6 +36,8 @@ interface InAppNotification {
   createdAt: Timestamp | null;
   read: boolean;
   blogId: string;
+  /** e.g. 'Welcome' for client-side Welcome Back */
+  category?: string;
 }
 
 interface NotificationBarProps {
@@ -111,67 +113,11 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
   const [markingAll, setMarkingAll] = useState(false);
   const [selectedNotification, setSelectedNotification] = useState<InAppNotification | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 639px)').matches : false
+  );
 
-  // ── Real-time listener ────────────────────────────────────────────────────
-  useEffect(() => {
-    const q = query(
-      collection(db, 'users', userId, 'inAppNotifications'),
-      orderBy('createdAt', 'desc')
-    );
-
-    const unsub = onSnapshot(
-      q,
-      (snapshot) => {
-        const items: InAppNotification[] = snapshot.docs.map((d) => ({
-          id: d.id,
-          title: d.data().title ?? '',
-          body: d.data().body ?? '',
-          url: d.data().url ?? '',
-          createdAt: d.data().createdAt ?? null,
-          read: d.data().read ?? false,
-          blogId: d.data().blogId ?? '',
-        }));
-        setNotifications(items);
-        setUnreadCount(items.filter((n) => !n.read).length);
-        setLoading(false);
-      },
-      (err) => {
-        console.error('[NotificationBar] Firestore snapshot error:', err);
-        setLoading(false);
-      }
-    );
-
-    return unsub;
-  }, [userId]);
-
-  // ── Lock scroll + Escape when detail modal is open ────────────────────────
-  useEffect(() => {
-    if (!selectedNotification) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSelectedNotification(null);
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.body.style.overflow = prev;
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [selectedNotification]);
-
-  // ── Close dropdown on outside click ──────────────────────────────────────
-  useEffect(() => {
-    if (!isOpen) return;
-    const handlePointerDown = (e: PointerEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('pointerdown', handlePointerDown);
-    return () => document.removeEventListener('pointerdown', handlePointerDown);
-  }, [isOpen]);
-
-  // ── Handlers ─────────────────────────────────────────────────────────────
+  // ── Handlers (declared before effects that call close / mark read) ────────
 
   const markNotificationRead = async (notif: InAppNotification) => {
     if (notif.read) return;
@@ -185,17 +131,23 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
   const openNotificationDetail = (notif: InAppNotification) => {
     setIsOpen(false);
     setSelectedNotification(notif);
-    void markNotificationRead(notif);
   };
 
-  const closeNotificationModal = () => setSelectedNotification(null);
+  /** Marks read in Firestore, then closes (unread items show "পড়ুন" until dismiss or link tap). */
+  const closeNotificationModal = () => {
+    setSelectedNotification((current) => {
+      if (current) void markNotificationRead(current);
+      return null;
+    });
+  };
 
   const handleReadMoreNavigate = () => {
     const n = selectedNotification;
     if (!n) return;
     const targetUrl = n.url?.trim();
+    if (!targetUrl) return;
     closeNotificationModal();
-    if (targetUrl) navigateTo(targetUrl);
+    navigateTo(targetUrl);
   };
 
   const handleMarkAllRead = async () => {
@@ -215,11 +167,126 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
     }
   };
 
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 639px)');
+    const onChange = () => setIsNarrowViewport(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  // ── Real-time listener ────────────────────────────────────────────────────
+  useEffect(() => {
+    const q = query(
+      collection(db, 'users', userId, 'inAppNotifications'),
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const items: InAppNotification[] = snapshot.docs.map((d) => {
+          const data = d.data();
+          return {
+            id: d.id,
+            title: data.title ?? '',
+            body: data.body ?? '',
+            url: data.url ?? '',
+            createdAt: data.createdAt ?? null,
+            read: data.read ?? false,
+            blogId: data.blogId ?? '',
+            category: typeof data.category === 'string' ? data.category : undefined,
+          };
+        });
+        setNotifications(items);
+        setUnreadCount(items.filter((n) => !n.read).length);
+        setLoading(false);
+      },
+      (err) => {
+        console.error('[NotificationBar] Firestore snapshot error:', err);
+        setLoading(false);
+      }
+    );
+
+    return unsub;
+  }, [userId]);
+
+  // ── Lock scroll + Escape when detail modal is open ────────────────────────
+  useEffect(() => {
+    if (!selectedNotification) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeNotificationModal();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = prev;
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [selectedNotification, closeNotificationModal]);
+
+  // ── Close dropdown on outside click (backdrop is outside containerRef on mobile) ──
+  useEffect(() => {
+    if (!isOpen) return;
+    const handlePointerDown = (e: PointerEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [isOpen]);
+
+  // ── Keep open modal in sync when Firestore listener updates the same item ──
+  useEffect(() => {
+    if (!selectedNotification) return;
+    const fresh = notifications.find((n) => n.id === selectedNotification.id);
+    if (fresh && fresh.read !== selectedNotification.read) {
+      setSelectedNotification(fresh);
+    }
+  }, [notifications, selectedNotification]);
+
+  // ── Lock body scroll when mobile sheet is open ────────────────────────────
+  useEffect(() => {
+    if (!isOpen || !isNarrowViewport) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [isOpen, isNarrowViewport]);
+
   const hasUnread = unreadCount > 0;
+
+  const dropdownMotionInitial = isNarrowViewport
+    ? { opacity: 0, y: 48, scale: 0.96 }
+    : { opacity: 0, y: -10, scale: 0.95 };
+  const dropdownMotionAnimate = { opacity: 1, y: 0, scale: 1 };
+  const dropdownMotionExit = isNarrowViewport
+    ? { opacity: 0, y: 32, scale: 0.98 }
+    : { opacity: 0, y: -10, scale: 0.95 };
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
+    <>
+      {/* Mobile: dimmed backdrop — outside bell container so outside-click + tap-to-dismiss work */}
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            key="notif-dropdown-backdrop"
+            role="presentation"
+            aria-hidden
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-[115] bg-black/40 backdrop-blur-sm sm:hidden"
+            onClick={() => setIsOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+
     <div ref={containerRef} className="relative shrink-0">
 
       {/* ── Bell trigger button ───────────────────────────────────────────── */}
@@ -272,36 +339,42 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
         </AnimatePresence>
       </button>
 
-      {/* ── Dropdown panel ────────────────────────────────────────────────── */}
+      {/* ── Dropdown / mobile sheet ───────────────────────────────────────── */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
             key="dropdown"
-            initial={{ opacity: 0, y: -10, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -10, scale: 0.95 }}
-            transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+            initial={dropdownMotionInitial}
+            animate={dropdownMotionAnimate}
+            exit={dropdownMotionExit}
+            transition={
+              isNarrowViewport
+                ? { type: 'spring', stiffness: 420, damping: 34, mass: 0.85 }
+                : { type: 'spring', stiffness: 380, damping: 32 }
+            }
             className={cn(
-              'absolute right-0 top-14 z-[100]',
-              'w-[min(26rem,calc(100vw-1rem))]',
-              'overflow-hidden rounded-2xl',
-              'border border-slate-200/80 dark:border-slate-700/80',
-              'bg-white dark:bg-slate-800',
-              'shadow-[0_20px_60px_-10px_rgba(0,0,0,0.25),0_8px_24px_-6px_rgba(99,102,241,0.18)]'
+              'z-[120] overflow-hidden rounded-2xl',
+              // Mobile: fixed, centered, within viewport (below app header area)
+              'fixed left-1/2 top-[max(5rem,env(safe-area-inset-top))] w-[92vw] max-w-lg -translate-x-1/2',
+              // Desktop: anchor to bell
+              'sm:absolute sm:inset-auto sm:right-0 sm:top-14 sm:w-[min(26rem,calc(100vw-1rem))] sm:max-w-none sm:translate-x-0',
+              // Glass + neon border (Ay-Bay-er-GustiMari aesthetic)
+              'border border-white/25 bg-white/10 shadow-[0_0_0_1px_rgba(99,102,241,0.35),0_25px_50px_-12px_rgba(0,0,0,0.45),0_0_40px_-8px_rgba(139,92,246,0.35)]',
+              'backdrop-blur-md dark:border-white/15 dark:bg-slate-900/80',
             )}
           >
 
             {/* Gradient header strip */}
-            <div className="relative overflow-hidden bg-gradient-to-r from-indigo-600 to-violet-600 px-5 py-4">
+            <div className="relative overflow-hidden bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-3 sm:px-5 sm:py-4">
               {/* Background shimmer */}
               <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.15),transparent_60%)]" />
 
-              <div className="relative flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/20 backdrop-blur-sm">
+              <div className="relative flex items-start justify-between gap-2">
+                <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/20 backdrop-blur-sm">
                     <Bell className="h-4 w-4 text-white" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <h3 className="text-sm font-bold text-white">Notifications</h3>
                     <p className="text-[10px] font-medium text-indigo-200">
                       {hasUnread
@@ -311,36 +384,49 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
                   </div>
                 </div>
 
-                {/* Unread count pill */}
-                {hasUnread && (
-                  <span className="flex items-center gap-1 rounded-full bg-white/20 px-2.5 py-1 text-[10px] font-black tracking-wide text-white backdrop-blur-sm">
-                    <span className="relative flex h-1.5 w-1.5">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
-                      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
+                <div className="flex shrink-0 items-center gap-2">
+                  {hasUnread && (
+                    <span className="hidden items-center gap-1 rounded-full bg-white/20 px-2.5 py-1 text-[10px] font-black tracking-wide text-white backdrop-blur-sm sm:inline-flex">
+                      <span className="relative flex h-1.5 w-1.5">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
+                        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
+                      </span>
+                      LIVE
                     </span>
-                    LIVE
-                  </span>
-                )}
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIsOpen(false)}
+                    aria-label="Close notifications"
+                    className={cn(
+                      'flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl',
+                      'bg-white/20 text-white backdrop-blur-sm transition hover:bg-white/30 active:scale-95',
+                      'ring-1 ring-white/30'
+                    )}
+                  >
+                    <X className="h-6 w-6" strokeWidth={2.5} />
+                  </button>
+                </div>
               </div>
             </div>
 
             {/* Notification list */}
-            <div className="max-h-[22rem] overflow-y-auto overscroll-contain">
+            <div className="max-h-[70vh] overflow-y-auto overscroll-contain sm:max-h-[22rem]">
               {loading ? (
                 <div className="flex flex-col items-center justify-center gap-3 py-10">
-                  <div className="h-7 w-7 animate-spin rounded-full border-[3px] border-indigo-500 border-t-transparent" />
-                  <p className="text-xs text-slate-400 dark:text-slate-500">Loading notifications…</p>
+                  <div className="h-7 w-7 animate-spin rounded-full border-[3px] border-indigo-400 border-t-transparent" />
+                  <p className="text-xs text-slate-600 dark:text-slate-300">Loading notifications…</p>
                 </div>
               ) : notifications.length === 0 ? (
                 <div className="flex flex-col items-center gap-4 px-6 py-10 text-center">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 dark:bg-slate-700">
-                    <BellOff className="h-8 w-8 text-slate-400 dark:text-slate-500" />
+                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/30 dark:bg-white/10">
+                    <BellOff className="h-8 w-8 text-slate-500 dark:text-slate-400" />
                   </div>
                   <div>
-                    <p className="text-sm font-bold text-slate-700 dark:text-slate-200">
+                    <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
                       No notifications yet
                     </p>
-                    <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                    <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                       You'll see blog updates and tips here
                     </p>
                   </div>
@@ -351,7 +437,7 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
                     <li
                       key={notif.id}
                       className={cn(
-                        'relative border-b border-slate-100 last:border-0 dark:border-slate-700/60',
+                        'relative border-b border-white/10 last:border-0 dark:border-white/10',
                         // Left accent bar for unread items
                         !notif.read && 'border-l-[3px] border-l-indigo-500'
                       )}
@@ -361,10 +447,10 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
                         onClick={() => openNotificationDetail(notif)}
                         className={cn(
                           'w-full px-4 py-4 text-left transition-all duration-150',
-                          'hover:bg-slate-50 dark:hover:bg-slate-700/60',
+                          'hover:bg-white/25 dark:hover:bg-white/10',
                           !notif.read
-                            ? 'bg-indigo-50/60 hover:bg-indigo-50/90 dark:bg-indigo-900/15 dark:hover:bg-indigo-900/25'
-                            : 'bg-white dark:bg-transparent'
+                            ? 'bg-indigo-500/15 hover:bg-indigo-500/20 dark:bg-indigo-500/20 dark:hover:bg-indigo-500/25'
+                            : 'bg-white/20 dark:bg-white/5'
                         )}
                       >
                         <div className="flex items-start gap-3.5">
@@ -373,25 +459,40 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
                             className={cn(
                               'flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-sm font-black text-white shadow-md',
                               'bg-gradient-to-br',
-                              avatarGradient(notif.title)
+                              notif.category === 'Welcome'
+                                ? 'from-pink-500 to-rose-600'
+                                : avatarGradient(notif.title)
                             )}
                           >
-                            {notif.title.charAt(0).toUpperCase() || <Sparkles className="h-4 w-4" />}
+                            {notif.category === 'Welcome' ? (
+                              <Heart className="h-5 w-5 fill-white/90 text-white" />
+                            ) : notif.title.charAt(0) ? (
+                              notif.title.charAt(0).toUpperCase()
+                            ) : (
+                              <Sparkles className="h-4 w-4" />
+                            )}
                           </div>
 
                           {/* Content */}
                           <div className="min-w-0 flex-1">
                             <div className="flex items-start justify-between gap-2">
-                              <p
-                                className={cn(
-                                  'text-sm leading-snug',
-                                  notif.read
-                                    ? 'font-medium text-slate-600 dark:text-slate-300'
-                                    : 'font-bold text-slate-800 dark:text-white'
+                              <div className="min-w-0 flex flex-wrap items-center gap-1.5">
+                                {notif.category === 'Welcome' && (
+                                  <span className="shrink-0 rounded-md bg-pink-500/15 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-pink-600 dark:text-pink-300">
+                                    Welcome
+                                  </span>
                                 )}
-                              >
-                                {notif.title}
-                              </p>
+                                <p
+                                  className={cn(
+                                    'min-w-0 text-sm leading-snug',
+                                    notif.read
+                                      ? 'font-medium text-slate-600 dark:text-slate-300'
+                                      : 'font-bold text-slate-800 dark:text-white'
+                                  )}
+                                >
+                                  {notif.title}
+                                </p>
+                              </div>
                               {/* Unread dot */}
                               {!notif.read && (
                                 <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-indigo-500 shadow-sm shadow-indigo-400" />
@@ -425,7 +526,7 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
 
             {/* Sticky footer: mark all read */}
             {notifications.length > 0 && (
-              <div className="border-t border-slate-100 bg-slate-50/80 px-4 py-3 backdrop-blur-sm dark:border-slate-700 dark:bg-slate-800/80">
+              <div className="border-t border-white/10 bg-slate-950/20 px-4 py-3 backdrop-blur-md dark:border-white/10 dark:bg-slate-950/40">
                 {hasUnread ? (
                   <button
                     onClick={handleMarkAllRead}
@@ -450,6 +551,8 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
           </motion.div>
         )}
       </AnimatePresence>
+
+    </div>
 
       {/* ── Detail modal (glass + neon) ───────────────────────────────────── */}
       <AnimatePresence>
@@ -504,10 +607,16 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
                       className={cn(
                         'flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-lg font-black text-white shadow-lg',
                         'bg-gradient-to-br',
-                        avatarGradient(selectedNotification.title)
+                        selectedNotification.category === 'Welcome'
+                          ? 'from-pink-500 to-rose-600'
+                          : avatarGradient(selectedNotification.title)
                       )}
                     >
-                      {selectedNotification.title.charAt(0).toUpperCase() || (
+                      {selectedNotification.category === 'Welcome' ? (
+                        <Heart className="h-6 w-6 fill-white/90 text-white" />
+                      ) : selectedNotification.title.charAt(0) ? (
+                        selectedNotification.title.charAt(0).toUpperCase()
+                      ) : (
                         <Sparkles className="h-5 w-5" />
                       )}
                     </div>
@@ -526,12 +635,19 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
                     </button>
                   </div>
 
-                  <h2
-                    id="notif-modal-title"
-                    className="pr-2 text-xl font-black leading-tight tracking-tight text-slate-900 dark:text-white sm:text-2xl"
-                  >
-                    {selectedNotification.title || 'বিজ্ঞপ্তি'}
-                  </h2>
+                  <div className="flex flex-wrap items-center gap-2 pr-2">
+                    {selectedNotification.category === 'Welcome' && (
+                      <span className="rounded-lg bg-pink-500/15 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-pink-600 dark:text-pink-300">
+                        Welcome
+                      </span>
+                    )}
+                    <h2
+                      id="notif-modal-title"
+                      className="text-xl font-black leading-tight tracking-tight text-slate-900 dark:text-white sm:text-2xl"
+                    >
+                      {selectedNotification.title || 'বিজ্ঞপ্তি'}
+                    </h2>
+                  </div>
 
                   <p className="mt-1 text-xs font-semibold text-indigo-600 dark:text-indigo-300">
                     {selectedNotification.createdAt?.toDate
@@ -551,19 +667,35 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {selectedNotification.url?.trim() ? (
-                        <button
-                          type="button"
-                          title="বিস্তারিত দেখুন"
-                          onClick={handleReadMoreNavigate}
-                          className={cn(
-                            'inline-flex min-h-[2.75rem] flex-1 items-center justify-center rounded-2xl px-6 py-2.5',
-                            'text-sm font-black text-white shadow-lg transition-all active:scale-[0.98]',
-                            'bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600',
-                            'shadow-indigo-500/35 hover:brightness-110 sm:flex-initial'
-                          )}
-                        >
-                          পড়ুন
-                        </button>
+                        selectedNotification.read ? (
+                          <button
+                            type="button"
+                            disabled
+                            title="পড়া হয়েছে"
+                            className={cn(
+                              'inline-flex min-h-[2.75rem] flex-1 cursor-not-allowed items-center justify-center rounded-2xl px-6 py-2.5',
+                              'text-sm font-black text-slate-600 dark:text-slate-400',
+                              'border border-slate-200/80 bg-slate-100/90 shadow-inner dark:border-white/10 dark:bg-slate-800/80',
+                              'sm:flex-initial'
+                            )}
+                          >
+                            পড়া হয়েছে
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            title="বিস্তারিত দেখুন"
+                            onClick={handleReadMoreNavigate}
+                            className={cn(
+                              'inline-flex min-h-[2.75rem] flex-1 items-center justify-center rounded-2xl px-6 py-2.5',
+                              'text-sm font-black text-white shadow-lg transition-all active:scale-[0.98]',
+                              'bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600',
+                              'shadow-indigo-500/35 hover:brightness-110 sm:flex-initial'
+                            )}
+                          >
+                            পড়ুন
+                          </button>
+                        )
                       ) : (
                         <button
                           type="button"
@@ -586,7 +718,7 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </>
   );
 };
 

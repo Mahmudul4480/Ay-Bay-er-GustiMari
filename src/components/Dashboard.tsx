@@ -2,6 +2,8 @@ import React from 'react';
 import { useTransactions } from '../hooks/useTransactions';
 import { useLocalization } from '../contexts/LocalizationContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useWelcomeBack } from '../hooks/useWelcomeBack';
+import WelcomeBackModal from './WelcomeBackModal';
 import { formatCurrency, cn } from '../lib/utils';
 import { useMonthSelection } from '../contexts/MonthSelectionContext';
 import {
@@ -80,7 +82,8 @@ function renderPieActiveShape(props: PieSectorDataItem) {
 const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
   const { transactions = [], debts = [] } = useTransactions();
   const { t, language } = useLocalization();
-  const { userProfile } = useAuth();
+  const { userProfile, user } = useAuth();
+  const { showWelcomeModal, closeWelcomeModal } = useWelcomeBack(user?.uid);
   const { selectedMonthKey: monthKey, currentMonthKey } = useMonthSelection();
   const isViewingCurrentCalendarMonth = monthKey === currentMonthKey;
   const isHistoryMode = !isViewingCurrentCalendarMonth;
@@ -977,6 +980,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
           </div>
         )}
       </AnimatePresence>
+
+      <WelcomeBackModal open={showWelcomeModal} onClose={closeWelcomeModal} />
     </div>
   );
 };
