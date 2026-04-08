@@ -5,7 +5,7 @@ import { TransactionFeedbackProvider } from './contexts/TransactionFeedbackConte
 import { TransactionsProvider } from './hooks/useTransactions';
 import { MonthSelectionProvider } from './contexts/MonthSelectionContext';
 import { loginWithGoogle, logout, isInAppBrowser, isConfigValid } from './firebaseConfig';
-import { LogOut, LayoutDashboard, CreditCard, Settings, Plus, Menu, X, Sun, Moon, AlertTriangle, ArrowLeft, Home, BookOpen, Lightbulb, Users } from 'lucide-react';
+import { LogOut, LayoutDashboard, CreditCard, Settings, Plus, Menu, X, Sun, Moon, AlertTriangle, ArrowLeft, Home, BookOpen, Lightbulb, Users, BarChart3 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 import Dashboard from './pages/Dashboard';
@@ -22,11 +22,14 @@ import BlogPage from './pages/BlogPage';
 import SmartTipsList from './components/SmartTipsList';
 import WelcomeOverlay from './components/WelcomeOverlay';
 import { useNotifications } from './hooks/useNotifications';
+import { useWelcomeBack } from './hooks/useWelcomeBack';
 import NotificationBar from './components/NotificationBar';
 import InstallPWA from './components/InstallPWA';
+import { usePeerBenchmarkInsight, peerSidebarSubtitle } from './hooks/usePeerBenchmarkInsight';
 
 const ADMIN_EMAIL = 'chotan4480@gmail.com';
 const FORCE_RELOGIN_NOTICE_KEY = 'force-relogin-notice';
+const APP_LOGO_URL = 'https://i.postimg.cc/K8yGqVdy/logo-png.png';
 
 function needsProfession(profile: { profession?: string } | null): boolean {
   if (!profile) return false;
@@ -78,6 +81,8 @@ const AppContent: React.FC = () => {
 
   // Register SW, request permission, get FCM token, save to Firestore, foreground listener
   useNotifications(user?.uid);
+  // Welcome-back in-app notification + lastActive (no modal — bell dropdown only)
+  useWelcomeBack(user?.uid);
 
   // Blog deep-link routing
   const { blogId, closeBlog } = useBlogRoute();
@@ -97,6 +102,13 @@ const AppContent: React.FC = () => {
   const [isMdUp, setIsMdUp] = React.useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(min-width: 768px)').matches : false
   );
+
+  const peerInsight = usePeerBenchmarkInsight();
+
+  const goDashboardFromPeerNav = React.useCallback(() => {
+    setActiveTab('dashboard');
+    setIsSidebarOpen(false);
+  }, []);
 
   React.useEffect(() => {
     const mq = window.matchMedia('(min-width: 768px)');
@@ -173,7 +185,7 @@ const AppContent: React.FC = () => {
         >
           <div className="logo-container inline-block mx-auto">
             <motion.img
-              src="https://i.postimg.cc/K8yGqVdy/logo-png.png"
+              src={APP_LOGO_URL}
               alt="Logo"
               className="w-64 h-auto object-contain cursor-pointer drop-shadow-2xl brightness-110"
               animate={{
@@ -340,7 +352,7 @@ const AppContent: React.FC = () => {
     return <CollectPhonePrompt />;
   }
 
-  type SidebarTab = { id: string; label: string; icon: React.ElementType; neon?: boolean };
+  type SidebarTab = { id: string; label: string; icon: React.ElementType; neon?: 'tips' | 'peer' };
 
   const personalTabs: SidebarTab[] = [
     {
@@ -350,10 +362,16 @@ const AppContent: React.FC = () => {
     },
     { id: 'transactions', label: t('transactions'), icon: CreditCard },
     {
+      id: 'peercomparison',
+      label: language === 'bn' ? 'সমকক্ষ তুলনা (বেনামী)' : 'Peer comparison (anonymous)',
+      icon: BarChart3,
+      neon: 'peer',
+    },
+    {
       id: 'smarttips',
       label: language === 'bn' ? 'আর্থিক টিপস' : 'Smart Tips',
       icon: Lightbulb,
-      neon: true,
+      neon: 'tips',
     },
     { id: 'settings', label: t('settings'), icon: Settings },
   ];
@@ -372,7 +390,42 @@ const AppContent: React.FC = () => {
 
   const renderSidebarTab = (tab: SidebarTab) => {
     const isActive = activeTab === tab.id;
-    if (tab.neon) {
+    if (tab.neon === 'peer') {
+      return (
+        <button
+          key={tab.id}
+          type="button"
+          onClick={goDashboardFromPeerNav}
+          title={peerSidebarSubtitle(
+            language === 'bn' ? 'bn' : 'en',
+            peerInsight.peerSpendTone,
+            peerInsight.avgPeerSpend,
+            peerInsight.peerSpendN,
+          )}
+          className={cn(
+            'peer-comparison-sidebar-btn relative flex w-full items-center gap-3 rounded-xl border border-emerald-200/70 p-3 font-bold transition-all hover:scale-[1.03] active:scale-[0.97]',
+            'bg-gradient-to-r from-emerald-50 to-cyan-50 text-emerald-900',
+            'dark:border-emerald-600/45 dark:from-emerald-950/45 dark:to-cyan-950/35 dark:text-emerald-100',
+            'hover:from-emerald-100 hover:to-cyan-100 dark:hover:from-emerald-900/55 dark:hover:to-cyan-900/45'
+          )}
+          aria-label={tab.label}
+        >
+          <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
+            <span className="absolute inline-flex h-3 w-3 animate-ping rounded-full bg-emerald-400 opacity-55" />
+            <tab.icon className="relative h-5 w-5 text-emerald-600 dark:text-emerald-300" />
+          </span>
+          <span className="min-w-0 flex-1 truncate text-left">{tab.label}</span>
+          <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-emerald-800 dark:bg-emerald-400/20 dark:text-emerald-100">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            </span>
+            {language === 'bn' ? 'লাইভ' : 'LIVE'}
+          </span>
+        </button>
+      );
+    }
+    if (tab.neon === 'tips') {
       return (
         <button
           key={tab.id}
@@ -438,27 +491,20 @@ const AppContent: React.FC = () => {
               <Home className="h-4 w-4" />
             </button>
           )}
-          <button
+          <motion.button
             type="button"
             onClick={goDashboard}
-            className="logo-container min-w-0 text-left"
+            className="sidebar-brand-hit min-w-0 shrink-0 text-left"
             aria-label="Go to dashboard"
+            whileTap={{ scale: 0.94 }}
           >
-            <motion.img
-              src="https://i.postimg.cc/K8yGqVdy/logo-png.png"
+            <img
+              src={APP_LOGO_URL}
               alt="Ay Bay Er GustiMari"
-              className="logo-glow h-auto max-h-10 w-auto max-w-[9rem] object-contain"
-              animate={{
-                y: [0, -3, 0],
-              }}
-              transition={{
-                duration: 3,
-                repeat: Infinity,
-                ease: 'easeInOut',
-              }}
-              whileTap={{ scale: 0.95 }}
+              className="sidebar-logo-neon h-auto max-h-10 w-auto max-w-[9rem] object-contain"
+              decoding="async"
             />
-          </button>
+          </motion.button>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button 
@@ -500,45 +546,29 @@ const AppContent: React.FC = () => {
             animate={{ x: 0 }}
             exit={{ x: -300 }}
             className={cn(
-              'fixed top-0 left-0 z-50 flex h-screen w-[min(16rem,85vw)] flex-col border-r border-slate-200 bg-white transition-colors dark:border-slate-700 dark:bg-slate-800 md:sticky md:flex md:w-64',
+              'fixed top-0 left-0 z-50 flex h-screen w-[min(17rem,88vw)] flex-col border-r border-slate-200 bg-white transition-colors dark:border-slate-700 dark:bg-slate-800 md:sticky md:flex md:w-[17rem]',
               !isSidebarOpen && 'hidden md:flex'
             )}
           >
-            <div className="flex flex-col items-center gap-4 p-6">
-              <button
-                type="button"
-                onClick={goDashboard}
-                className="logo-container hidden w-full md:block"
-                aria-label="Go to dashboard"
-              >
-                <motion.img
-                  src="https://i.postimg.cc/K8yGqVdy/logo-png.png"
-                  alt="Ay Bay Er GustiMari"
-                  className="logo-glow mx-auto h-auto w-48 cursor-pointer object-contain"
-                  animate={{
-                    y: [0, -3, 0],
-                  }}
-                  transition={{
-                    duration: 3,
-                    repeat: Infinity,
-                    ease: 'easeInOut',
-                  }}
-                  whileTap={{ scale: 0.95 }}
-                />
-              </button>
-              <button
-                type="button"
-                onClick={goDashboard}
-                className="logo-container w-full md:hidden"
-                aria-label="Go to dashboard"
-              >
-                <motion.img
-                  src="https://i.postimg.cc/K8yGqVdy/logo-png.png"
-                  alt="Ay Bay Er GustiMari"
-                  className="logo-glow mx-auto h-auto max-w-[10rem] cursor-pointer object-contain"
-                  whileTap={{ scale: 0.95 }}
-                />
-              </button>
+            <div className="flex flex-col items-stretch gap-4 px-4 pt-5 pb-4 md:px-5">
+              <div className="flex w-full justify-center border-b border-slate-200/90 pb-5 dark:border-slate-600/80">
+                <motion.button
+                  type="button"
+                  onClick={goDashboard}
+                  className="sidebar-brand-hit flex w-full max-w-[15rem] cursor-pointer flex-col items-center justify-center rounded-2xl p-2 outline-none focus-visible:ring-2 focus-visible:ring-violet-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-800 md:max-w-[16.5rem]"
+                  aria-label="Go to dashboard"
+                  whileTap={{ scale: 0.96 }}
+                >
+                  <img
+                    src={APP_LOGO_URL}
+                    alt="Ay Bay Er GustiMari"
+                    width={220}
+                    height={80}
+                    className="sidebar-logo-neon pointer-events-none mx-auto h-auto max-h-[7.5rem] w-full object-contain md:max-h-[8.5rem]"
+                    decoding="async"
+                  />
+                </motion.button>
+              </div>
               <button 
                 onClick={() => setIsDarkMode(!isDarkMode)} 
                 className="w-full flex items-center justify-between gap-3 p-3 px-4 bg-slate-50 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-all border border-slate-100 dark:border-slate-700 shadow-sm group"

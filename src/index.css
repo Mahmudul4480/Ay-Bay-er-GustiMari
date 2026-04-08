@@ -52,6 +52,189 @@
       inset 0 1px 0 rgba(255, 255, 255, 0.04);
   }
 
+  /* ── Dashboard core KPI: deep 3D neomorphism + neon rim ── */
+  .kpi-stat-neo {
+    @apply relative min-w-0 overflow-hidden rounded-[1.35rem] border transition-[box-shadow,transform] duration-200;
+    transform-style: preserve-3d;
+  }
+
+  .kpi-stat-neo--balance {
+    background: linear-gradient(148deg, #f0f9ff 0%, #e0f2fe 42%, #dbeafe 100%);
+    border-color: rgba(56, 189, 248, 0.45);
+    box-shadow:
+      10px 10px 22px rgba(15, 23, 42, 0.1),
+      -8px -8px 20px rgba(255, 255, 255, 0.85),
+      inset 3px 3px 6px rgba(255, 255, 255, 0.75),
+      inset -4px -5px 10px rgba(14, 165, 233, 0.12),
+      0 0 0 1px rgba(125, 211, 252, 0.35),
+      0 0 36px rgba(56, 189, 248, 0.28);
+  }
+
+  .dark .kpi-stat-neo--balance {
+    background: linear-gradient(148deg, #0c4a6e 0%, #0e7490 48%, #164e63 100%);
+    border-color: rgba(34, 211, 238, 0.32);
+    box-shadow:
+      8px 8px 24px rgba(0, 0, 0, 0.5),
+      -5px -5px 16px rgba(34, 211, 238, 0.08),
+      inset 3px 3px 8px rgba(255, 255, 255, 0.07),
+      inset -5px -6px 14px rgba(0, 0, 0, 0.45),
+      0 0 0 1px rgba(6, 182, 212, 0.25),
+      0 0 44px rgba(14, 165, 233, 0.28);
+  }
+
+  .kpi-stat-neo--income {
+    background: linear-gradient(148deg, #ecfdf5 0%, #d1fae5 45%, #a7f3d0 100%);
+    border-color: rgba(52, 211, 153, 0.5);
+    box-shadow:
+      10px 10px 22px rgba(15, 23, 42, 0.09),
+      -8px -8px 20px rgba(255, 255, 255, 0.88),
+      inset 3px 3px 6px rgba(255, 255, 255, 0.7),
+      inset -4px -5px 10px rgba(16, 185, 129, 0.14),
+      0 0 0 1px rgba(110, 231, 183, 0.4),
+      0 0 36px rgba(52, 211, 153, 0.3);
+  }
+
+  .dark .kpi-stat-neo--income {
+    background: linear-gradient(148deg, #064e3b 0%, #065f46 50%, #047857 100%);
+    border-color: rgba(52, 211, 153, 0.28);
+    box-shadow:
+      8px 8px 24px rgba(0, 0, 0, 0.5),
+      -5px -5px 16px rgba(52, 211, 153, 0.1),
+      inset 3px 3px 8px rgba(255, 255, 255, 0.06),
+      inset -5px -6px 14px rgba(0, 0, 0, 0.45),
+      0 0 0 1px rgba(16, 185, 129, 0.22),
+      0 0 44px rgba(16, 185, 129, 0.26);
+  }
+
+  .kpi-stat-neo--expense {
+    background: linear-gradient(148deg, #fff1f2 0%, #ffe4e6 42%, #fecdd3 100%);
+    border-color: rgba(251, 113, 133, 0.55);
+    box-shadow:
+      10px 10px 22px rgba(15, 23, 42, 0.1),
+      -8px -8px 20px rgba(255, 255, 255, 0.85),
+      inset 3px 3px 6px rgba(255, 255, 255, 0.72),
+      inset -4px -5px 10px rgba(244, 63, 94, 0.14),
+      0 0 0 1px rgba(253, 164, 175, 0.45),
+      0 0 36px rgba(244, 63, 94, 0.26);
+  }
+
+  .dark .kpi-stat-neo--expense {
+    background: linear-gradient(148deg, #4c0519 0%, #881337 48%, #9f1239 100%);
+    border-color: rgba(251, 113, 133, 0.3);
+    box-shadow:
+      8px 8px 24px rgba(0, 0, 0, 0.52),
+      -5px -5px 16px rgba(251, 113, 133, 0.08),
+      inset 3px 3px 8px rgba(255, 255, 255, 0.05),
+      inset -5px -6px 14px rgba(0, 0, 0, 0.5),
+      0 0 0 1px rgba(244, 63, 94, 0.28),
+      0 0 44px rgba(244, 63, 94, 0.22);
+  }
+
+  .kpi-stat-neo--debt {
+    background: linear-gradient(148deg, #fffbeb 0%, #fef3c7 45%, #fde68a 100%);
+    border-color: rgba(251, 191, 36, 0.55);
+    box-shadow:
+      10px 10px 22px rgba(15, 23, 42, 0.09),
+      -8px -8px 20px rgba(255, 255, 255, 0.88),
+      inset 3px 3px 6px rgba(255, 255, 255, 0.75),
+      inset -4px -5px 10px rgba(245, 158, 11, 0.16),
+      0 0 0 1px rgba(252, 211, 77, 0.45),
+      0 0 36px rgba(245, 158, 11, 0.28);
+  }
+
+  .dark .kpi-stat-neo--debt {
+    background: linear-gradient(148deg, #451a03 0%, #78350f 50%, #92400e 100%);
+    border-color: rgba(251, 191, 36, 0.28);
+    box-shadow:
+      8px 8px 24px rgba(0, 0, 0, 0.52),
+      -5px -5px 16px rgba(251, 191, 36, 0.09),
+      inset 3px 3px 8px rgba(255, 255, 255, 0.06),
+      inset -5px -6px 14px rgba(0, 0, 0, 0.48),
+      0 0 0 1px rgba(245, 158, 11, 0.25),
+      0 0 44px rgba(251, 146, 60, 0.22);
+  }
+
+  .kpi-stat-neo-icon {
+    @apply flex shrink-0 items-center justify-center rounded-2xl border;
+  }
+
+  .kpi-stat-neo--balance .kpi-stat-neo-icon {
+    border-color: rgba(56, 189, 248, 0.35);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.65) 0%, rgba(224, 242, 254, 0.9) 100%);
+    box-shadow:
+      inset 2px 2px 5px rgba(255, 255, 255, 0.9),
+      inset -2px -3px 6px rgba(14, 165, 233, 0.15),
+      0 4px 14px rgba(56, 189, 248, 0.25);
+  }
+
+  .dark .kpi-stat-neo--balance .kpi-stat-neo-icon {
+    border-color: rgba(34, 211, 238, 0.25);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.1) 0%, rgba(8, 145, 178, 0.35) 100%);
+    box-shadow:
+      inset 2px 2px 6px rgba(255, 255, 255, 0.08),
+      inset -3px -4px 8px rgba(0, 0, 0, 0.35),
+      0 0 20px rgba(34, 211, 238, 0.2);
+  }
+
+  .kpi-stat-neo--income .kpi-stat-neo-icon {
+    border-color: rgba(52, 211, 153, 0.4);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.7) 0%, rgba(209, 250, 229, 0.95) 100%);
+    box-shadow:
+      inset 2px 2px 5px rgba(255, 255, 255, 0.88),
+      inset -2px -3px 6px rgba(16, 185, 129, 0.18),
+      0 4px 14px rgba(52, 211, 153, 0.28);
+  }
+
+  .dark .kpi-stat-neo--income .kpi-stat-neo-icon {
+    border-color: rgba(52, 211, 153, 0.22);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.08) 0%, rgba(5, 150, 105, 0.4) 100%);
+    box-shadow:
+      inset 2px 2px 6px rgba(255, 255, 255, 0.06),
+      inset -3px -4px 8px rgba(0, 0, 0, 0.4),
+      0 0 20px rgba(52, 211, 153, 0.18);
+  }
+
+  .kpi-stat-neo--expense .kpi-stat-neo-icon {
+    border-color: rgba(251, 113, 133, 0.45);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.65) 0%, rgba(255, 228, 230, 0.95) 100%);
+    box-shadow:
+      inset 2px 2px 5px rgba(255, 255, 255, 0.85),
+      inset -2px -3px 6px rgba(244, 63, 94, 0.16),
+      0 4px 14px rgba(244, 63, 94, 0.22);
+  }
+
+  .dark .kpi-stat-neo--expense .kpi-stat-neo-icon {
+    border-color: rgba(251, 113, 133, 0.25);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.06) 0%, rgba(190, 18, 60, 0.45) 100%);
+    box-shadow:
+      inset 2px 2px 6px rgba(255, 255, 255, 0.05),
+      inset -3px -4px 8px rgba(0, 0, 0, 0.45),
+      0 0 20px rgba(251, 113, 133, 0.2);
+  }
+
+  .kpi-stat-neo--debt .kpi-stat-neo-icon {
+    border-color: rgba(251, 191, 36, 0.45);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.7) 0%, rgba(254, 243, 199, 0.95) 100%);
+    box-shadow:
+      inset 2px 2px 5px rgba(255, 255, 255, 0.88),
+      inset -2px -3px 6px rgba(245, 158, 11, 0.2),
+      0 4px 14px rgba(245, 158, 11, 0.26);
+  }
+
+  .dark .kpi-stat-neo--debt .kpi-stat-neo-icon {
+    border-color: rgba(251, 191, 36, 0.22);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.08) 0%, rgba(180, 83, 9, 0.45) 100%);
+    box-shadow:
+      inset 2px 2px 6px rgba(255, 255, 255, 0.06),
+      inset -3px -4px 8px rgba(0, 0, 0, 0.45),
+      0 0 20px rgba(251, 191, 36, 0.18);
+  }
+
+  /* Historical month: violet pulse ring on KPIs */
+  .kpi-stat-neo--history {
+    @apply ring-2 ring-violet-400/35 ring-offset-2 ring-offset-slate-50 dark:ring-violet-500/30 dark:ring-offset-slate-900;
+  }
+
   /* Historical month view: glass + neon accent on dashboard */
   .dashboard-history-root {
     @apply p-1 sm:p-2;
@@ -151,6 +334,88 @@
   20%, 100% { transform: translateX(200%) translateY(200%) rotate(45deg); }
 }
 
+/* Dashboard — financial personality ribbon (slow metallic sweep) */
+@keyframes persona-ribbon-gleam {
+  0% {
+    transform: translateX(-20%);
+    opacity: 0.35;
+  }
+  45% {
+    opacity: 0.95;
+  }
+  100% {
+    transform: translateX(220%);
+    opacity: 0.35;
+  }
+}
+
+.persona-ribbon-gleam {
+  animation: persona-ribbon-gleam 4.5s ease-in-out infinite;
+}
+
+/* Sidebar brand — visible overflow so hover shake isn’t clipped */
+.sidebar-brand-hit {
+  position: relative;
+  overflow: visible;
+}
+
+.sidebar-logo-neon {
+  filter:
+    drop-shadow(0 0 10px rgba(139, 92, 246, 0.42))
+    drop-shadow(0 0 22px rgba(34, 211, 238, 0.18));
+  transition: filter 0.2s ease;
+}
+
+.dark .sidebar-logo-neon {
+  filter:
+    drop-shadow(0 0 12px rgba(167, 139, 250, 0.5))
+    drop-shadow(0 0 28px rgba(34, 211, 238, 0.2));
+}
+
+@keyframes logo-angry-shake {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  12% {
+    transform: translate(-5px, 4px) rotate(-5deg);
+  }
+  25% {
+    transform: translate(6px, -5px) rotate(5deg);
+  }
+  38% {
+    transform: translate(-6px, -3px) rotate(-4deg);
+  }
+  50% {
+    transform: translate(5px, 5px) rotate(4deg);
+  }
+  62% {
+    transform: translate(-4px, 2px) rotate(-3deg);
+  }
+  75% {
+    transform: translate(4px, -4px) rotate(3deg);
+  }
+  88% {
+    transform: translate(-3px, 3px) rotate(-2deg);
+  }
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+}
+
+.sidebar-brand-hit:hover .sidebar-logo-neon {
+  filter:
+    drop-shadow(0 0 14px rgba(236, 72, 153, 0.45))
+    drop-shadow(0 0 26px rgba(139, 92, 246, 0.55))
+    drop-shadow(0 0 36px rgba(34, 211, 238, 0.22));
+  animation: logo-angry-shake 0.24s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-brand-hit:hover .sidebar-logo-neon {
+    animation: none;
+  }
+}
+
 .logo-container {
   position: relative;
   overflow: hidden;
@@ -241,9 +506,116 @@
   animation: neon-breathe 2.4s ease-in-out infinite;
 }
 
+/* Sidebar — peer comparison (cyber emerald + cyan pulse) */
+@keyframes neon-breathe-cyber {
+  0%,
+  100% {
+    box-shadow:
+      0 0 8px rgba(16, 185, 129, 0.4),
+      0 0 20px rgba(6, 182, 212, 0.26),
+      0 0 36px rgba(45, 212, 191, 0.12);
+  }
+  50% {
+    box-shadow:
+      0 0 16px rgba(16, 185, 129, 0.65),
+      0 0 34px rgba(6, 182, 212, 0.42),
+      0 0 56px rgba(45, 212, 191, 0.2),
+      inset 0 0 14px rgba(16, 185, 129, 0.05);
+  }
+}
+
+.peer-comparison-sidebar-btn {
+  animation: neon-breathe-cyber 2.5s ease-in-out infinite;
+}
+
 /* Applied to the dashboard banner */
 .smart-tips-banner {
   animation: neon-breathe 2.8s ease-in-out infinite;
+}
+
+/* Peer spend insight — same rhythm as Smart Tips, tint follows spend vs peers */
+@keyframes neon-breathe-emerald {
+  0%, 100% {
+    box-shadow:
+      0 0 8px  rgba(16, 185, 129, 0.45),
+      0 0 20px rgba(16, 185, 129, 0.22),
+      0 0 40px rgba(16, 185, 129, 0.10);
+  }
+  50% {
+    box-shadow:
+      0 0 18px rgba(16, 185, 129, 0.75),
+      0 0 38px rgba(16, 185, 129, 0.40),
+      0 0 68px rgba(16, 185, 129, 0.20),
+      inset 0 0 18px rgba(16, 185, 129, 0.08);
+  }
+}
+
+@keyframes neon-breathe-amber {
+  0%, 100% {
+    box-shadow:
+      0 0 8px  rgba(245, 158, 11, 0.45),
+      0 0 20px rgba(245, 158, 11, 0.22),
+      0 0 40px rgba(245, 158, 11, 0.10);
+  }
+  50% {
+    box-shadow:
+      0 0 18px rgba(245, 158, 11, 0.78),
+      0 0 38px rgba(245, 158, 11, 0.42),
+      0 0 68px rgba(245, 158, 11, 0.20),
+      inset 0 0 18px rgba(245, 158, 11, 0.08);
+  }
+}
+
+@keyframes neon-breathe-rose {
+  0%, 100% {
+    box-shadow:
+      0 0 8px  rgba(244, 63, 94, 0.45),
+      0 0 20px rgba(244, 63, 94, 0.22),
+      0 0 40px rgba(244, 63, 94, 0.10);
+  }
+  50% {
+    box-shadow:
+      0 0 18px rgba(244, 63, 94, 0.78),
+      0 0 38px rgba(244, 63, 94, 0.42),
+      0 0 68px rgba(244, 63, 94, 0.20),
+      inset 0 0 18px rgba(244, 63, 94, 0.08);
+  }
+}
+
+.peer-tip-banner {
+  animation-duration: 2.8s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+.peer-tip-banner.peer-tip--save {
+  animation-name: neon-breathe-emerald;
+}
+
+.peer-tip-banner.peer-tip--warn {
+  animation-name: neon-breathe-amber;
+}
+
+.peer-tip-banner.peer-tip--alert {
+  animation-name: neon-breathe-rose;
+}
+
+.neon-text-emerald {
+  text-shadow:
+    0 0 8px  rgba(16, 185, 129, 0.65),
+    0 0 20px rgba(16, 185, 129, 0.35);
+}
+
+.neon-text-amber {
+  text-shadow:
+    0 0 8px  rgba(245, 158, 11, 0.65),
+    0 0 20px rgba(245, 158, 11, 0.35);
+}
+
+.neon-text-rose {
+  text-shadow:
+    0 0 8px  rgba(244, 63, 94, 0.65),
+    0 0 20px rgba(244, 63, 94, 0.35);
 }
 
 /* Neon glow text for Smart Tips headings */

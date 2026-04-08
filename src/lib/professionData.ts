@@ -331,3 +331,14 @@ export function getProfessionLabel(id: string | undefined | null): string {
   const p = PROFESSIONS.find((x) => x.id === id);
   return p?.label ?? id;
 }
+
+/** English `label` or Bengali `sublabel` for user-facing sentences. */
+export function getProfessionDisplayName(
+  id: string | undefined | null,
+  language: 'en' | 'bn',
+): string {
+  if (!id) return language === 'bn' ? 'অনির্দিষ্ট' : 'Unspecified';
+  const p = PROFESSIONS.find((x) => x.id === id);
+  if (!p) return id;
+  return language === 'bn' ? p.sublabel : p.label;
+}

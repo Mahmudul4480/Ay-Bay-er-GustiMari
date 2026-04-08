@@ -794,6 +794,114 @@ export async function generatePersonalFinanceTip(params: PersonalFinanceTipParam
   );
 }
 
+/** Prefer Gemini 1.5 Flash for new-user welcome pushes; fall back if the model is unavailable. */
+const NEW_USER_WELCOME_MODEL_CANDIDATES = [
+  'gemini-1.5-flash',
+  'gemini-2.5-flash',
+  'gemini-2.0-flash-lite',
+] as const;
+
+const WELCOME_PUSH_TITLE_MAX = 72;
+const WELCOME_PUSH_MESSAGE_MAX = 420;
+
+/**
+ * JSON push copy for brand-new users (Bangla, energetic). Same shape as Direct Notify: title + message.
+ */
+export async function generateNewUserAiWelcome(params: {
+  displayName: string;
+  profession: string;
+  deviceOs: string;
+  deviceBrowser?: string;
+}): Promise<PersonalFinanceTipResult> {
+  if (!GEMINI_API_KEY) {
+    throw new Error(
+      'Gemini API key is not configured. Add VITE_GEMINI_API_KEY to your .env file.',
+    );
+  }
+
+  const name = params.displayName.trim() || 'বন্ধু';
+  const prof = params.profession.trim() || 'ব্যবহারকারী';
+  const os = params.deviceOs.trim() || 'ডিভাইস';
+  const browser = params.deviceBrowser?.trim();
+
+  const prompt = `You write a mobile PUSH NOTIFICATION for someone who just joined the personal finance app "Ay Bay Er GustiMari".
+Always write the app name exactly as: Ay Bay Er GustiMari (never abbreviate).
+
+New user context:
+- Name (for greeting): ${name}
+- Profession label: ${prof}
+- Device OS: ${os}${browser ? `\n- Browser: ${browser}` : ''}
+
+Rules:
+1) Tone: very welcoming, energetic, warm, helpful — like a friendly Bangladeshi teammate cheering them on.
+2) Language: primarily Bangla (Bengali), natural spoken style; occasional common English words for app/tech are OK if natural.
+3) Message goal: Welcome them to the Ay Bay Er GustiMari family. Explain that as a ${prof}, tracking expenses on their ${os} will be easy with this app. Encourage them to add their first income or expense entry today.
+4) Do NOT give financial, investment, tax, or legal advice.
+5) Output ONLY valid JSON with exactly two string keys: "title" and "message" (no markdown fences, no extra keys).
+   - title: short Bangla title; may resemble: স্বাগতম [short name] ভাই! — max ~${WELCOME_PUSH_TITLE_MAX} characters.
+   - message: notification body, 2–4 short sentences, max ~${WELCOME_PUSH_MESSAGE_MAX} characters; end with encouragement.`;
+
+  const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+  const errors: string[] = [];
+  const fallbackTitle = `স্বাগতম, ${name}!`;
+
+  const baseWelcomeConfig = {
+    responseMimeType: 'application/json' as const,
+    temperature: 0.86,
+    topP: 0.92,
+    maxOutputTokens: 1024,
+  };
+
+  for (const modelName of NEW_USER_WELCOME_MODEL_CANDIDATES) {
+    try {
+      const run = async (useSchema: boolean) => {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: useSchema
+            ? { ...baseWelcomeConfig, responseSchema: DIRECT_NOTIFY_RESPONSE_SCHEMA }
+            : baseWelcomeConfig,
+        });
+        const result = await model.generateContent(prompt);
+        const raw = getDirectNotifyRawText(result.response);
+        if (!raw) {
+          throw new Error('Gemini returned an empty response.');
+        }
+        return parsePersonalFinanceTipJson(raw, fallbackTitle, {
+          maxTitle: WELCOME_PUSH_TITLE_MAX,
+          maxMessage: WELCOME_PUSH_MESSAGE_MAX,
+        });
+      };
+
+      try {
+        return await run(true);
+      } catch (first: unknown) {
+        const msg = first instanceof Error ? first.message : String(first);
+        if (
+          /responseSchema|schema|invalid argument|400|unsupported/i.test(msg) &&
+          !/parse|JSON|empty/i.test(msg)
+        ) {
+          return await run(false);
+        }
+        throw first;
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('429') || /quota/i.test(msg)) {
+        throw new Error('Gemini API quota exceeded (429). Please wait and try again.');
+      }
+      if (msg.includes('404') || /not found/i.test(msg)) {
+        errors.push(`${modelName}: unavailable`);
+        continue;
+      }
+      throw new Error(`Gemini: ${msg.slice(0, 400)}`);
+    }
+  }
+
+  throw new Error(
+    `No Gemini model available for new-user welcome.\nTried: ${NEW_USER_WELCOME_MODEL_CANDIDATES.join(', ')}\n${errors.join('\n')}`,
+  );
+}
+
 /**
  * Rich-context re-engagement push for one user (all-time stats + notes).
  * Appends {@link REENGAGEMENT_NOTIFICATION_DISCLAIMER_BN} to the body automatically.

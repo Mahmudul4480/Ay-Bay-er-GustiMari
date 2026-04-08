@@ -1,13 +1,13 @@
 /**
  * Irregular user = last app open (lastActive) was >= 7 days ago.
- * On Dashboard: Welcome Back modal + in-app notification + lastActive refresh.
+ * In-app notification + lastActive refresh (bell dropdown only).
  *
  * All user-doc writes use `updateDoc` / `batch.update` with only `lastActive` (and
  * notification subcollection docs) — never `setDoc` without merge, so phoneNumber,
  * profession, and onboarding flags cannot be wiped by this hook.
  */
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import {
   doc,
   getDoc,
@@ -39,24 +39,15 @@ function toDate(value: unknown): Date | null {
   return null;
 }
 
-export interface UseWelcomeBackResult {
-  showWelcomeModal: boolean;
-  closeWelcomeModal: () => void;
-  welcomeBackReady: boolean;
-}
-
-export function useWelcomeBack(userId: string | undefined): UseWelcomeBackResult {
-  const [showWelcomeModal, setShowWelcomeModal] = useState(false);
-  const [ready, setReady] = useState(false);
+/**
+ * Runs once per eligible return visit: writes Welcome in-app notification + refreshes lastActive.
+ * UI is shown only in NotificationBar (no full-screen modal).
+ */
+export function useWelcomeBack(userId: string | undefined): void {
   const cancelledRef = useRef(false);
-
-  const closeWelcomeModal = useCallback(() => {
-    setShowWelcomeModal(false);
-  }, []);
 
   useEffect(() => {
     if (!userId) {
-      setReady(true);
       return;
     }
 
@@ -67,7 +58,6 @@ export function useWelcomeBack(userId: string | undefined): UseWelcomeBackResult
         const userRef = doc(db, 'users', userId);
         const snap = await getDoc(userRef);
         if (cancelledRef.current || !snap.exists()) {
-          setReady(true);
           return;
         }
 
@@ -75,7 +65,6 @@ export function useWelcomeBack(userId: string | undefined): UseWelcomeBackResult
 
         if (!lastDate) {
           await updateDoc(userRef, { lastActive: serverTimestamp() });
-          setReady(true);
           return;
         }
 
@@ -83,7 +72,6 @@ export function useWelcomeBack(userId: string | undefined): UseWelcomeBackResult
 
         if (daysSince < IRREGULAR_DAYS) {
           await updateDoc(userRef, { lastActive: serverTimestamp() });
-          setReady(true);
           return;
         }
 
@@ -92,7 +80,6 @@ export function useWelcomeBack(userId: string | undefined): UseWelcomeBackResult
         const periodKey = `welcome-back-${userId}-${lastDate.getTime()}`;
         if (sessionStorage.getItem(periodKey) === '1') {
           await updateDoc(userRef, { lastActive: serverTimestamp() });
-          setReady(true);
           return;
         }
 
@@ -117,13 +104,8 @@ export function useWelcomeBack(userId: string | undefined): UseWelcomeBackResult
           throw e;
         }
 
-        if (!cancelledRef.current) {
-          setShowWelcomeModal(true);
-        }
       } catch (e) {
         console.error('[useWelcomeBack]', e);
-      } finally {
-        setReady(true);
       }
     };
 
@@ -133,10 +115,4 @@ export function useWelcomeBack(userId: string | undefined): UseWelcomeBackResult
       cancelledRef.current = true;
     };
   }, [userId]);
-
-  return {
-    showWelcomeModal,
-    closeWelcomeModal,
-    welcomeBackReady: ready,
-  };
 }

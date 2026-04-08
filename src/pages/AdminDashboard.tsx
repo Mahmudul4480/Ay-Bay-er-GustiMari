@@ -6,6 +6,7 @@ import {
   addDoc,
   doc,
   updateDoc,
+  setDoc,
   serverTimestamp,
   query,
   orderBy,
@@ -58,6 +59,12 @@ import {
   MessageSquare,
   Mail,
   MessageCircle,
+  Smartphone,
+  Monitor,
+  Laptop,
+  Terminal,
+  MapPin,
+  Heart,
 } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { useLocalization } from '../contexts/LocalizationContext';
@@ -76,7 +83,7 @@ import {
   Sector,
 } from 'recharts';
 import type { PieSectorDataItem } from 'recharts';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 import {
   queueNotificationsForUsers,
   queueNotificationForUser,
@@ -86,6 +93,7 @@ import {
   generatePersonalFinanceTip,
   generateReengagementPushForUser,
   generateAdminUserStrategicInsight,
+  generateNewUserAiWelcome,
   REENGAGEMENT_NOTIFICATION_DISCLAIMER_BN,
   type DirectNotifyUserType,
 } from '../lib/geminiApi';
@@ -108,6 +116,11 @@ import {
   MARKETING_TAGS_CATALOG,
   type IntelligenceBucket,
 } from '../lib/intelligenceKeywords';
+import { buildPeerBenchmarkPayload } from '../lib/peerBenchmarks';
+import { GROWTH_MARKETING_TAGS } from '../lib/growthMarketingTags';
+import { vaultTotalBdt, parseWealthVault, computeAllTimeCashBalance } from '../lib/growthFinance';
+import type { Transaction } from '../hooks/useTransactions';
+import { normalizeStoredOs, type DeviceAccessType } from '../lib/deviceDetection';
 
 type LeadMetricsRow = {
   lqi: number;
@@ -207,6 +220,112 @@ function MarketingCyberBadges({ tags, className }: { tags: string[]; className?:
   );
 }
 
+type AdminDeviceInfo = {
+  os?: string;
+  browser?: string;
+  accessType?: string;
+  deviceBrand?: string;
+} | null;
+
+function DeviceAccessBadge({ accessType }: { accessType?: string | null }) {
+  const at = accessType?.trim() as DeviceAccessType | '';
+  if (!at) {
+    return (
+      <span
+        title="পুরনো ডাটা — পরবর্তী লগইনে আপডেট হবে"
+        className="inline-flex min-w-[1.35rem] shrink-0 items-center justify-center rounded-md border border-slate-300/80 bg-slate-100 px-1 py-0.5 text-[8px] font-black uppercase leading-none text-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-400"
+      >
+        —
+      </span>
+    );
+  }
+  if (at === 'Installed App') {
+    return (
+      <span
+        title="এরা আপনার আসল ইউজার"
+        className="inline-flex max-w-[3.25rem] shrink-0 truncate rounded-md border border-emerald-500/75 bg-emerald-500/20 px-1 py-0.5 text-[8px] font-black leading-none tracking-tight text-emerald-900 dark:border-emerald-400/50 dark:bg-emerald-950/55 dark:text-emerald-100"
+      >
+        অ্যাপ
+      </span>
+    );
+  }
+  if (at === 'In-App Browser (FB/WA)') {
+    return (
+      <span
+        title="এরা ফেসবুক/মেসেঞ্জার থেকে লিঙ্ক ওপেন করেছে"
+        className="inline-flex max-w-[3.5rem] shrink-0 truncate rounded-md border border-rose-500/85 bg-rose-500/20 px-1 py-0.5 text-[8px] font-black leading-none tracking-tight text-rose-950 dark:border-rose-400/55 dark:bg-rose-950/55 dark:text-rose-100"
+      >
+        ইন-অ্যাপ
+      </span>
+    );
+  }
+  if (at === 'Mobile Browser' || at === 'Desktop') {
+    return (
+      <span
+        title="এরা শুধু লিঙ্ক ক্লিক করে দেখছে"
+        className="inline-flex max-w-[3.25rem] shrink-0 truncate rounded-md border border-amber-500/75 bg-amber-400/30 px-1 py-0.5 text-[8px] font-black leading-none tracking-tight text-amber-950 dark:border-amber-400/45 dark:bg-amber-950/45 dark:text-amber-100"
+      >
+        {at === 'Desktop' ? 'ডেস্ক' : 'ওয়েব'}
+      </span>
+    );
+  }
+  return (
+    <span
+      title={at}
+      className="inline-flex max-w-[3rem] shrink-0 truncate rounded-md border border-slate-400/60 bg-slate-100 px-1 py-0.5 text-[8px] font-black leading-none text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+    >
+      ?
+    </span>
+  );
+}
+
+function UserDeviceOsIcon({ deviceInfo }: { deviceInfo?: AdminDeviceInfo }) {
+  const osNorm = normalizeStoredOs(deviceInfo?.os);
+  const tip =
+    [deviceInfo?.deviceBrand, deviceInfo?.os || osNorm, deviceInfo?.browser, deviceInfo?.accessType]
+      .filter(Boolean)
+      .join(' · ') || 'No device captured yet';
+  const base = 'h-4 w-4 shrink-0 drop-shadow-[0_0_6px_rgba(148,163,184,0.35)]';
+  let node: React.ReactNode;
+  switch (osNorm) {
+    case 'Android':
+      node = <Smartphone className={cn(base, 'text-emerald-500')} aria-hidden />;
+      break;
+    case 'iOS':
+      node = <Smartphone className={cn(base, 'text-sky-200')} aria-hidden />;
+      break;
+    case 'Windows':
+      node = <Monitor className={cn(base, 'text-sky-400')} aria-hidden />;
+      break;
+    case 'Mac':
+      node = <Laptop className={cn(base, 'text-indigo-300')} aria-hidden />;
+      break;
+    case 'Linux':
+      node = <Terminal className={cn(base, 'text-amber-500')} aria-hidden />;
+      break;
+    default:
+      node = <Monitor className={cn(base, 'text-slate-400 opacity-50')} aria-hidden />;
+  }
+  return (
+    <span title={tip} className="inline-flex items-center gap-1">
+      {node}
+      <DeviceAccessBadge accessType={deviceInfo?.accessType} />
+    </span>
+  );
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function userDocCreatedAtMs(data: { createdAt?: unknown }): number | null {
+  const c = data.createdAt;
+  if (c == null) return null;
+  if (typeof (c as { toMillis?: () => number }).toMillis === 'function') {
+    return (c as { toMillis: () => number }).toMillis();
+  }
+  if (c instanceof Date) return c.getTime();
+  if (typeof c === 'number' && !Number.isNaN(c)) return c;
+  return null;
+}
+
 // ── Constants ──────────────────────────────────────────────────────────────────
 const ADMIN_EMAIL = 'chotan4480@gmail.com';
 
@@ -221,6 +340,50 @@ const TAG_META: Record<string, { emoji: string; bg: string; text: string }> = {
   'Debt Payer': { emoji: '💳', bg: 'bg-rose-100 dark:bg-rose-900/40',  text: 'text-rose-700 dark:text-rose-300' },
   Gourmet:      { emoji: '🍽️', bg: 'bg-amber-100 dark:bg-amber-900/40', text: 'text-amber-700 dark:text-amber-300' },
 };
+
+/** Dhaka high-value areas — matched as case-insensitive substrings on `locationIntelligence.city` or `.postal`. */
+const PREMIUM_AREA_KEYWORDS = ['Gulshan', 'Banani', 'Dhanmondi', 'Baridhara', 'Uttara'] as const;
+
+type AdminLocationIntel = {
+  city?: string;
+  region?: string;
+  postal?: string;
+  lastUpdated?: string;
+} | null | undefined;
+
+function userHasPremiumLocation(u: { locationIntelligence?: AdminLocationIntel }): boolean {
+  const li = u.locationIntelligence;
+  if (!li) return false;
+  const hay = [li.city, li.postal]
+    .filter((s) => s != null && String(s).trim() !== '')
+    .map((s) => String(s).toLowerCase())
+    .join(' ');
+  if (!hay.trim()) return false;
+  return PREMIUM_AREA_KEYWORDS.some((kw) => hay.includes(kw.toLowerCase()));
+}
+
+function LocationIntelNeonBadge({ kind, value }: { kind: 'City' | 'Region'; value: string }) {
+  const v = value.trim();
+  if (!v) return null;
+  return (
+    <span
+      title={kind}
+      className="inline-flex max-w-full items-center truncate rounded-lg border border-indigo-400/55 bg-indigo-500/[0.14] px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-indigo-950 shadow-[0_0_14px_rgba(99,102,241,0.42),inset_0_1px_0_rgba(255,255,255,0.12)] dark:border-violet-500/45 dark:bg-violet-600/[0.18] dark:text-violet-50 dark:shadow-[0_0_16px_rgba(139,92,246,0.45),inset_0_1px_0_rgba(255,255,255,0.08)]"
+    >
+      <span className="mr-1.5 shrink-0 text-[8px] text-indigo-600/90 dark:text-violet-200/90">{kind}</span>
+      <span className="truncate normal-case tracking-normal">{v}</span>
+    </span>
+  );
+}
+
+function PremiumLocationUserBadge() {
+  return (
+    <span className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-amber-400/85 bg-gradient-to-r from-amber-500/[0.22] via-yellow-400/[0.18] to-amber-500/[0.22] px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.12em] text-amber-950 shadow-[0_0_18px_rgba(251,191,36,0.55),0_0_32px_rgba(234,179,8,0.2),inset_0_1px_0_rgba(255,255,255,0.2)] dark:border-amber-300/50 dark:from-amber-500/35 dark:via-yellow-400/20 dark:to-amber-500/35 dark:text-amber-50 dark:shadow-[0_0_22px_rgba(251,191,36,0.5),inset_0_1px_0_rgba(255,255,255,0.15)]">
+      <Star className="h-3.5 w-3.5 shrink-0 text-amber-500 drop-shadow-[0_0_6px_rgba(251,191,36,0.9)] dark:text-amber-300" aria-hidden />
+      <span className="leading-tight">Premium Location User</span>
+    </span>
+  );
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -764,6 +927,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [filterProfession, setFilterProfession] = useState('');
   const [filterTag, setFilterTag] = useState('');
   const [filterMarketingTag, setFilterMarketingTag] = useState('');
+  const [filterPremiumLocationOnly, setFilterPremiumLocationOnly] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
 
   // ── Modal state
@@ -823,6 +987,14 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [financialNetworkDocs, setFinancialNetworkDocs] = useState<any[]>([]);
   const [fbExportGoldOnly, setFbExportGoldOnly] = useState(false);
 
+  const [adminMainTab, setAdminMainTab] = useState<'all' | 'newArrivals'>('all');
+  const [welcomeModalUser, setWelcomeModalUser] = useState<any | null>(null);
+  const [welcomeTitleDraft, setWelcomeTitleDraft] = useState('');
+  const [welcomeMessageDraft, setWelcomeMessageDraft] = useState('');
+  const [welcomeGenLoading, setWelcomeGenLoading] = useState(false);
+  const [welcomeSendLoading, setWelcomeSendLoading] = useState(false);
+  const [welcomeModalError, setWelcomeModalError] = useState<string | null>(null);
+
   const [adminUserPhoneDraft, setAdminUserPhoneDraft] = useState('');
   const [adminUserPhoneSaving, setAdminUserPhoneSaving] = useState(false);
   const [adminUserPhoneError, setAdminUserPhoneError] = useState<string | null>(null);
@@ -854,6 +1026,23 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     );
     return () => { unsubUsers(); unsubTx(); unsubIntelligence(); };
   }, []);
+
+  /** Recompute anonymized peer benchmarks for the user app (profession × category wallet share). */
+  useEffect(() => {
+    if (user?.email !== ADMIN_EMAIL) return;
+    const payload = buildPeerBenchmarkPayload(
+      transactions as Transaction[],
+      rawUsers.map((u: { id: string; profession?: string }) => ({ id: u.id, profession: u.profession })),
+    );
+    const t = window.setTimeout(() => {
+      void setDoc(
+        doc(db, 'peer_benchmarks', 'v1'),
+        { ...payload, updatedAt: serverTimestamp() },
+        { merge: true },
+      ).catch((e) => console.warn('[Admin] peer_benchmarks:', e));
+    }, 3200);
+    return () => window.clearTimeout(t);
+  }, [user?.email, transactions, rawUsers]);
 
   useEffect(() => {
     const unsubD = onSnapshot(
@@ -905,6 +1094,68 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       setAdminUserPhoneSaving(false);
     }
   }, [selectedUser, adminUserPhoneDraft, user?.email]);
+
+  const closeWelcomeModal = useCallback(() => {
+    setWelcomeModalUser(null);
+    setWelcomeTitleDraft('');
+    setWelcomeMessageDraft('');
+    setWelcomeModalError(null);
+    setWelcomeGenLoading(false);
+    setWelcomeSendLoading(false);
+  }, []);
+
+  const startAiWelcomeFlow = useCallback(
+    async (u: any, e?: React.MouseEvent) => {
+      e?.stopPropagation();
+      if (user?.email !== ADMIN_EMAIL) return;
+      if (u.aiWelcomeSent) return;
+      setWelcomeModalUser(u);
+      setWelcomeTitleDraft('');
+      setWelcomeMessageDraft('');
+      setWelcomeModalError(null);
+      setWelcomeGenLoading(true);
+      try {
+        const di = (u.deviceInfo || {}) as NonNullable<AdminDeviceInfo>;
+        const preview = await generateNewUserAiWelcome({
+          displayName: u.displayName || 'বন্ধু',
+          profession: getProfessionLabel(u.profession),
+          deviceOs: di.os || 'Unknown',
+          deviceBrowser: di.browser,
+        });
+        setWelcomeTitleDraft(preview.title);
+        setWelcomeMessageDraft(preview.message);
+      } catch (err: unknown) {
+        setWelcomeModalError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setWelcomeGenLoading(false);
+      }
+    },
+    [user?.email],
+  );
+
+  const sendAiWelcomePush = useCallback(async () => {
+    if (!welcomeModalUser || user?.email !== ADMIN_EMAIL) return;
+    const title = welcomeTitleDraft.trim();
+    const message = welcomeMessageDraft.trim();
+    if (!title || !message) {
+      setWelcomeModalError('Title and message are required.');
+      return;
+    }
+    setWelcomeSendLoading(true);
+    setWelcomeModalError(null);
+    try {
+      await queueNotificationForUser(welcomeModalUser.id, title, message);
+      await updateDoc(doc(db, 'users', welcomeModalUser.id), {
+        aiWelcomeSent: true,
+        aiWelcomeSentAt: serverTimestamp(),
+      });
+      closeWelcomeModal();
+    } catch (err: unknown) {
+      setWelcomeModalError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setWelcomeSendLoading(false);
+    }
+  }, [welcomeModalUser, welcomeTitleDraft, welcomeMessageDraft, user?.email, closeWelcomeModal]);
 
   // Blogs list for User Monitoring push composer + Global Campaign
   useEffect(() => {
@@ -1087,6 +1338,26 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       lastTxMs: maxMs,
     };
   }, [selectedUser?.id, transactions]);
+
+  const selectedUserGrowth = useMemo(() => {
+    if (!selectedUser?.id) return null;
+    const txs = transactions.filter((t: any) => t.userId === selectedUser.id) as Transaction[];
+    const cash = computeAllTimeCashBalance(txs);
+    const vault = parseWealthVault(selectedUser.wealthVault);
+    const vTot = vaultTotalBdt(vault);
+    const wl = Array.isArray(selectedUser.wishlist) ? selectedUser.wishlist.length : 0;
+    const don = Array.isArray(selectedUser.donations) ? selectedUser.donations.length : 0;
+    const fp = selectedUser.financialPersona as { label?: string; labelBn?: string } | undefined;
+    return {
+      cash,
+      vaultTotal: vTot,
+      netWorth: cash + vTot,
+      wishlistCount: wl,
+      donationCount: don,
+      personaLabel: fp?.label || '—',
+      personaBn: fp?.labelBn || '',
+    };
+  }, [selectedUser, transactions]);
 
   /** Users enriched with spending stats and behavioural tags (this month). */
   const users = useMemo(() => rawUsers.map((rawUser: any) => {
@@ -1287,6 +1558,45 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       .sort((a: any, b: any) => b.daysInactive - a.daysInactive);
   }, [rawUsers, transactions, inactiveFilter]);
 
+  const marketingTagOptions = useMemo(
+    () =>
+      [...new Set([...MARKETING_TAGS_CATALOG, ...GROWTH_MARKETING_TAGS])].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [],
+  );
+
+  /** Cross-user wishlist frequency for campaign targeting. */
+  const wishlistDemandReport = useMemo(() => {
+    const map = new Map<
+      string,
+      { count: number; sumPrice: number; category: string; name: string; sampleUsers: string[] }
+    >();
+    rawUsers.forEach((u: any) => {
+      const wl = u.wishlist;
+      if (!Array.isArray(wl)) return;
+      wl.forEach((item: any) => {
+        const name = String(item?.name || '').trim() || 'Unknown';
+        const cat = String(item?.category || '').trim() || '—';
+        const key = `${cat}|||${name.slice(0, 120)}`;
+        const price = Math.max(0, Number(item?.price) || 0);
+        const row = map.get(key) ?? {
+          count: 0,
+          sumPrice: 0,
+          category: cat,
+          name,
+          sampleUsers: [] as string[],
+        };
+        row.count += 1;
+        row.sumPrice += price;
+        const dn = String(u.displayName || u.email || u.id || '');
+        if (dn && row.sampleUsers.length < 4 && !row.sampleUsers.includes(dn)) row.sampleUsers.push(dn);
+        map.set(key, row);
+      });
+    });
+    return [...map.values()].sort((a, b) => b.count - a.count).slice(0, 50);
+  }, [rawUsers]);
+
   const allExpenseCategories = useMemo(() => {
     const cats = new Set<string>();
     users.forEach((u) => Object.keys(u.categoryBreakdown).forEach((c) => cats.add(c)));
@@ -1342,6 +1652,19 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
     return { byUid, counts, totalByUser, count7 };
   }, [transactions, visibleUsers]);
+
+  /** Joined ≤48h ago, zero transactions (ghost), still visible in admin list. */
+  const newArrivalUsers = useMemo(() => {
+    const now = Date.now();
+    const cutoff = now - 48 * 60 * 60 * 1000;
+    const totalByUser = leadGenSegment.totalByUser;
+    return visibleUsers.filter((u) => {
+      const joined = userDocCreatedAtMs(u as { createdAt?: unknown });
+      if (joined == null || joined < cutoff) return false;
+      if ((totalByUser[u.id] || 0) > 0) return false;
+      return true;
+    });
+  }, [visibleUsers, leadGenSegment]);
 
   /** User IDs for global campaign by activity segment (same rules as Lead table tabs). */
   const campaignTargetUserIds = useMemo(() => {
@@ -1478,6 +1801,11 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       .sort((a, b) => b.users.length - a.users.length);
   }, [userIntelligenceMap, rawUsers]);
 
+  const premiumLocationUserCount = useMemo(
+    () => visibleUsers.filter((u) => userHasPremiumLocation(u as { locationIntelligence?: AdminLocationIntel })).length,
+    [visibleUsers],
+  );
+
   const filteredUsers = useMemo(() => {
     const filtered = visibleUsers.filter((u) => {
       const term = searchTerm.toLowerCase();
@@ -1494,12 +1822,27 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         const m = (u as { marketingTags?: string[] }).marketingTags ?? [];
         if (!m.includes(filterMarketingTag)) return false;
       }
+      if (filterPremiumLocationOnly && !userHasPremiumLocation(u as { locationIntelligence?: AdminLocationIntel })) {
+        return false;
+      }
       return true;
     });
     return filtered.sort(
       (a, b) => getUserListSortTimeMs(b as any, transactions) - getUserListSortTimeMs(a as any, transactions),
     );
-  }, [visibleUsers, searchTerm, incomeMin, incomeMax, filterCategory, filterCategoryMin, filterProfession, filterTag, filterMarketingTag, transactions]);
+  }, [
+    visibleUsers,
+    searchTerm,
+    incomeMin,
+    incomeMax,
+    filterCategory,
+    filterCategoryMin,
+    filterProfession,
+    filterTag,
+    filterMarketingTag,
+    filterPremiumLocationOnly,
+    transactions,
+  ]);
 
   const leadMetricsByUid = useMemo(() => {
     const now = Date.now();
@@ -1616,7 +1959,8 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const exportFullCsv = () => {
     const headers = [
       'Name', 'Email', 'Phone', 'Profession', 'Monthly Income', 'Monthly Expense', 'Balance',
-      'Top Category', 'Tags', 'Marketing Tags', 'LQI Score', 'Lead Tier', 'Merchant Prospect', 'Top 3 Creditors',
+      'Top Category', 'Tags', 'Marketing Tags', 'Persona', 'Wishlist Count', 'Net Worth Est',
+      'LQI Score', 'Lead Tier', 'Merchant Prospect', 'Top 3 Creditors',
     ];
     const lines = [
       headers.join(','),
@@ -1625,11 +1969,19 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         const tierLabel =
           lm?.tier === 'gold' ? 'Gold Lead' : lm?.tier === 'silver' ? 'Silver Lead' : 'Standard';
         const mTags = ((u as { marketingTags?: string[] }).marketingTags ?? []).join('; ');
+        const fp = (u as { financialPersona?: { label?: string } }).financialPersona;
+        const wl = Array.isArray((u as { wishlist?: unknown[] }).wishlist)
+          ? (u as { wishlist: unknown[] }).wishlist.length
+          : 0;
+        const txs = transactions.filter((t: any) => t.userId === u.id) as Transaction[];
+        const cash = computeAllTimeCashBalance(txs);
+        const nw = cash + vaultTotalBdt(parseWealthVault((u as { wealthVault?: unknown }).wealthVault));
         return [
           escapeCsv(u.displayName || 'N/A'), escapeCsv(u.email),
           escapeCsv(u.phoneNumber || 'N/A'), escapeCsv(getProfessionLabel(u.profession)),
           u.totalIncome, u.totalExpense, u.balance,
           escapeCsv(u.topCategory), escapeCsv(u.tags.join('; ')), escapeCsv(mTags),
+          escapeCsv(fp?.label || ''), wl, Math.round(nw),
           lm?.lqi ?? '', tierLabel, lm?.merchantProspect ? 'yes' : 'no', escapeCsv(lm?.topCreditors ?? ''),
         ].join(',');
       }),
@@ -2042,6 +2394,58 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           </motion.div>
         ))}
       </div>
+
+      {/* ── Wishlist demand (cross-user) ── */}
+      {wishlistDemandReport.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="neon-card overflow-hidden rounded-[2rem] border border-fuchsia-200/60 bg-gradient-to-br from-fuchsia-500/[0.06] via-white/80 to-indigo-500/[0.06] p-5 shadow-[0_20px_50px_-20px_rgba(217,70,239,0.35)] backdrop-blur-xl dark:border-fuchsia-500/20 dark:from-fuchsia-950/30 dark:via-slate-900/40 dark:to-indigo-950/25 sm:p-6"
+        >
+          <div className="mb-4 flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-fuchsia-500/20 ring-1 ring-fuchsia-400/40">
+              <Heart className="h-5 w-5 text-fuchsia-600 dark:text-fuchsia-300" />
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-800 dark:text-white">Wishlist demand signals</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Aggregated from <code className="rounded bg-white/60 px-1 dark:bg-slate-800">users.wishlist</code> · top
+                intents by frequency
+              </p>
+            </div>
+          </div>
+          <div className="max-h-64 overflow-x-auto overflow-y-auto rounded-2xl border border-white/50 dark:border-white/10">
+            <table className="w-full min-w-[520px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-200/80 bg-white/50 text-xs font-bold uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400">
+                  <th className="px-3 py-2">Item</th>
+                  <th className="px-3 py-2">Category</th>
+                  <th className="px-3 py-2 text-right">Users</th>
+                  <th className="px-3 py-2 text-right">Σ price</th>
+                  <th className="px-3 py-2">Sample users</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                {wishlistDemandReport.map((row) => (
+                  <tr key={`${row.category}-${row.name}`} className="bg-white/30 dark:bg-slate-900/20">
+                    <td className="px-3 py-2 font-semibold text-slate-800 dark:text-slate-100">{row.name}</td>
+                    <td className="px-3 py-2 text-slate-600 dark:text-slate-300">{row.category}</td>
+                    <td className="px-3 py-2 text-right font-mono font-bold text-fuchsia-600 dark:text-fuchsia-300">
+                      {row.count}
+                    </td>
+                    <td className="px-3 py-2 text-right text-slate-700 dark:text-slate-200">
+                      {formatCurrency(row.sumPrice, language)}
+                    </td>
+                    <td className="max-w-[12rem] truncate px-3 py-2 text-xs text-slate-500" title={row.sampleUsers.join(', ')}>
+                      {row.sampleUsers.join(', ')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </motion.div>
+      )}
 
       {/* ── Charts ── */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -2571,7 +2975,44 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         </motion.div>
       )}
 
+      {/* ── Main directory tabs ── */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setAdminMainTab('all')}
+          className={cn(
+            'rounded-2xl px-5 py-2.5 text-sm font-bold transition-all',
+            adminMainTab === 'all'
+              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30'
+              : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300',
+          )}
+        >
+          All users
+        </button>
+        <button
+          type="button"
+          onClick={() => setAdminMainTab('newArrivals')}
+          className={cn(
+            'inline-flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-bold transition-all',
+            adminMainTab === 'newArrivals'
+              ? 'bg-gradient-to-r from-teal-500 to-emerald-600 text-white shadow-lg shadow-teal-500/35'
+              : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300',
+          )}
+        >
+          <Sparkles className="h-4 w-4" /> New Arrivals
+          <span
+            className={cn(
+              'ml-0.5 rounded-full px-2 py-0.5 text-[10px] font-black tabular-nums',
+              adminMainTab === 'newArrivals' ? 'bg-white/25 text-white' : 'bg-teal-100 text-teal-800 dark:bg-teal-900/50 dark:text-teal-200',
+            )}
+          >
+            {newArrivalUsers.length}
+          </span>
+        </button>
+      </div>
+
       {/* ── Advanced Filters ── */}
+      {adminMainTab === 'all' && (
       <div className="space-y-3">
         <div className="flex gap-3">
           <div className="relative flex-1">
@@ -2590,7 +3031,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             )}
           >
             <Filter className="h-4 w-4" />
-            Filters {filterProfession || filterTag || filterMarketingTag || incomeMin || incomeMax || filterCategory ? '●' : ''}
+            Filters {filterProfession || filterTag || filterMarketingTag || incomeMin || incomeMax || filterCategory || filterPremiumLocationOnly ? '●' : ''}
           </button>
         </div>
 
@@ -2638,13 +3079,57 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-violet-500 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
                   >
                     <option value="">Any — show all users</option>
-                    {MARKETING_TAGS_CATALOG.map((t) => (
+                    {marketingTagOptions.map((t) => (
                       <option key={t} value={t}>{t}</option>
                     ))}
                   </select>
                   <p className="text-[10px] text-slate-400 dark:text-slate-500">
                     Matches saved <code className="rounded bg-slate-200/80 px-1 dark:bg-slate-700">users.marketingTags</code> (e.g. Zakat Payer, EBL User).
                   </p>
+                </div>
+                <div className="space-y-2 sm:col-span-2 lg:col-span-4">
+                  <label className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    High-value locations
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setFilterPremiumLocationOnly((p) => !p)}
+                    className={cn(
+                      'flex w-full flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left text-sm font-bold transition-all',
+                      filterPremiumLocationOnly
+                        ? 'border-amber-400/70 bg-gradient-to-r from-amber-500/15 via-yellow-400/10 to-amber-500/15 text-amber-950 shadow-[0_0_20px_rgba(251,191,36,0.25)] dark:border-amber-400/45 dark:from-amber-500/20 dark:via-yellow-500/10 dark:to-amber-500/20 dark:text-amber-50 dark:shadow-[0_0_18px_rgba(251,191,36,0.2)]'
+                        : 'border-indigo-200/80 bg-gradient-to-r from-indigo-500/[0.07] to-violet-500/[0.1] text-slate-700 hover:border-indigo-300 dark:border-violet-500/25 dark:from-indigo-950/35 dark:to-violet-950/30 dark:text-slate-200 dark:hover:border-violet-400/40',
+                    )}
+                  >
+                    <span className="flex min-w-0 items-start gap-2">
+                      <MapPin
+                        className={cn(
+                          'mt-0.5 h-4 w-4 shrink-0',
+                          filterPremiumLocationOnly ? 'text-amber-600 dark:text-amber-300' : 'text-indigo-500 dark:text-violet-400',
+                        )}
+                      />
+                      <span className="min-w-0">
+                        <span className="block font-black">
+                          {filterPremiumLocationOnly ? 'Showing premium-area users only' : 'Filter by high-value locations'}
+                        </span>
+                        <span className="mt-0.5 block text-[10px] font-semibold normal-case leading-snug opacity-90">
+                          Gulshan, Banani, Dhanmondi, Baridhara, Uttara — matches{' '}
+                          <code className="rounded bg-white/50 px-1 dark:bg-slate-900/60">locationIntelligence.city</code> or{' '}
+                          <code className="rounded bg-white/50 px-1 dark:bg-slate-900/60">.postal</code>
+                        </span>
+                      </span>
+                    </span>
+                    <span
+                      className={cn(
+                        'shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black tabular-nums',
+                        filterPremiumLocationOnly
+                          ? 'bg-amber-500/25 text-amber-900 dark:bg-amber-400/20 dark:text-amber-100'
+                          : 'bg-indigo-500/15 text-indigo-700 dark:bg-violet-500/20 dark:text-violet-200',
+                      )}
+                    >
+                      {premiumLocationUserCount} match{premiumLocationUserCount !== 1 ? 'es' : ''}
+                    </span>
+                  </button>
                 </div>
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-2 px-1">
@@ -2657,8 +3142,8 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                     {tag === '' ? 'All' : (TAG_META[tag]?.emoji ?? '') + ' ' + tag}
                   </button>
                 ))}
-                {(searchTerm || incomeMin || incomeMax || filterCategory || filterProfession || filterTag || filterMarketingTag) && (
-                  <button onClick={() => { setSearchTerm(''); setIncomeMin(''); setIncomeMax(''); setFilterCategory(''); setFilterCategoryMin(''); setFilterProfession(''); setFilterTag(''); setFilterMarketingTag(''); }}
+                {(searchTerm || incomeMin || incomeMax || filterCategory || filterProfession || filterTag || filterMarketingTag || filterPremiumLocationOnly) && (
+                  <button onClick={() => { setSearchTerm(''); setIncomeMin(''); setIncomeMax(''); setFilterCategory(''); setFilterCategoryMin(''); setFilterProfession(''); setFilterTag(''); setFilterMarketingTag(''); setFilterPremiumLocationOnly(false); }}
                     className="rounded-full bg-red-100 px-4 py-1.5 text-xs font-bold text-red-600 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400">
                     Clear All
                   </button>
@@ -2668,6 +3153,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           )}
         </AnimatePresence>
       </div>
+      )}
 
       {/* ── User directory (single list, newest login / activity first) ── */}
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
@@ -2675,17 +3161,42 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         <div className="space-y-2 border-b border-slate-100 p-5 dark:border-slate-700 sm:p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-100 dark:bg-blue-900/40">
-                <Users className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+              <div
+                className={cn(
+                  'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl',
+                  adminMainTab === 'newArrivals'
+                    ? 'bg-teal-100 dark:bg-teal-900/40'
+                    : 'bg-blue-100 dark:bg-blue-900/40',
+                )}
+              >
+                {adminMainTab === 'newArrivals' ? (
+                  <Sparkles className="h-5 w-5 text-teal-600 dark:text-teal-300" />
+                ) : (
+                  <Users className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                )}
               </div>
               <div>
-                <h3 className="font-bold text-slate-800 dark:text-white">Users</h3>
+                <h3 className="font-bold text-slate-800 dark:text-white">
+                  {adminMainTab === 'newArrivals' ? 'New Arrivals' : 'Users'}
+                </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {filteredUsers.length} shown · {visibleUsers.length} total · sorted by latest login / activity (top = most recent)
+                  {adminMainTab === 'newArrivals' ? (
+                    <>
+                      Signed up in the last <span className="font-semibold text-slate-700 dark:text-slate-200">48 hours</span> with{' '}
+                      <span className="font-semibold text-teal-600 dark:text-teal-400">zero transactions</span> · {newArrivalUsers.length} user
+                      {newArrivalUsers.length !== 1 ? 's' : ''}
+                    </>
+                  ) : (
+                    <>
+                      {filteredUsers.length} shown · {visibleUsers.length} total · sorted by latest login / activity (top = most recent)
+                    </>
+                  )}
                 </p>
-                <p className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
-                  Segments: Ghost {leadGenSegment.counts.ghost} · Irregular {leadGenSegment.counts.irregular} · Power {leadGenSegment.counts.power} · row badge = activity type
-                </p>
+                {adminMainTab === 'all' && (
+                  <p className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
+                    Segments: Ghost {leadGenSegment.counts.ghost} · Irregular {leadGenSegment.counts.irregular} · Power {leadGenSegment.counts.power} · row badge = activity type
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -2696,16 +3207,121 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           </div>
         )}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1180px] text-left text-sm">
+          <table
+            className={cn(
+              'w-full text-left text-sm',
+              adminMainTab === 'newArrivals' ? 'min-w-[920px]' : 'min-w-[1180px]',
+            )}
+          >
             <thead>
               <tr className="bg-slate-50/80 dark:bg-slate-900/40">
-                {['User', 'Last activity', 'Email / Phone', 'Profession', 'Monthly Income', 'LQI', 'Lead', 'Top Category', 'Net Balance', 'Behaviour Tags', 'Action'].map((h) => (
-                  <th key={h} className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">{h}</th>
-                ))}
+                {adminMainTab === 'newArrivals'
+                  ? ['User', 'Joined', 'Profession', 'Device', 'Welcome', 'Action'].map((h) => (
+                      <th key={h} className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        {h}
+                      </th>
+                    ))
+                  : ['User', 'Last activity', 'Email / Phone', 'Profession', 'Monthly Income', 'LQI', 'Lead', 'Top Category', 'Net Balance', 'Behaviour Tags', 'Action'].map((h) => (
+                      <th key={h} className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">{h}</th>
+                    ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
-              {filteredUsers.map((u) => {
+              {adminMainTab === 'newArrivals'
+                ? newArrivalUsers.map((u) => {
+                    const joinedMs = userDocCreatedAtMs(u as { createdAt?: unknown });
+                    const di = (u as { deviceInfo?: AdminDeviceInfo }).deviceInfo;
+                    const osLabel = di?.deviceBrand?.trim() || di?.os?.trim() || 'Unknown';
+                    const welcomed = Boolean((u as { aiWelcomeSent?: boolean }).aiWelcomeSent);
+                    const genThisUser = welcomeGenLoading && welcomeModalUser?.id === u.id;
+                    return (
+                      <tr
+                        key={u.id}
+                        onClick={() => handleUserClick(u)}
+                        className="group cursor-pointer transition-colors hover:bg-teal-50/50 dark:hover:bg-teal-950/20"
+                      >
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-3">
+                            {u.photoURL ? (
+                              <img src={u.photoURL} alt="" className="h-10 w-10 rounded-2xl object-cover" />
+                            ) : (
+                              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 dark:bg-slate-700">
+                                <UserIcon className="h-5 w-5 text-slate-400" />
+                              </div>
+                            )}
+                            <div className="min-w-0">
+                              <p className="font-bold text-slate-800 dark:text-white">{u.displayName || 'Anonymous'}</p>
+                              <p className="truncate text-[10px] text-slate-400">{u.email}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="whitespace-nowrap px-5 py-4">
+                          {joinedMs != null ? (
+                            <>
+                              <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                                {format(new Date(joinedMs), 'MMM d, yyyy · HH:mm')}
+                              </p>
+                              <p className="text-[10px] text-teal-600 dark:text-teal-400">
+                                {formatDistanceToNow(new Date(joinedMs), { addSuffix: true })}
+                              </p>
+                            </>
+                          ) : (
+                            <span className="text-xs text-slate-400">—</span>
+                          )}
+                        </td>
+                        <td className="px-5 py-4">
+                          <span className="rounded-xl bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+                            {getProfessionLabel(u.profession)}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-2">
+                            <UserDeviceOsIcon deviceInfo={di} />
+                            <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{osLabel}</span>
+                          </div>
+                        </td>
+                        <td className="px-5 py-4">
+                          {welcomed ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-black uppercase text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">
+                              <CheckCheck className="h-3 w-3" /> Welcomed
+                            </span>
+                          ) : (
+                            <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-black uppercase text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+                              Pending
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-5 py-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <motion.button
+                              type="button"
+                              whileHover={{ scale: welcomed ? 1 : 1.04 }}
+                              whileTap={{ scale: welcomed ? 1 : 0.96 }}
+                              onClick={(e) => void startAiWelcomeFlow(u, e)}
+                              disabled={welcomed || genThisUser || user?.email !== ADMIN_EMAIL}
+                              className={cn(
+                                'inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-xs font-black shadow-lg transition-all disabled:cursor-not-allowed disabled:opacity-45',
+                                welcomed
+                                  ? 'bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
+                                  : 'bg-gradient-to-r from-violet-500 via-fuchsia-500 to-pink-500 text-white shadow-fuchsia-500/30 hover:shadow-fuchsia-500/45',
+                              )}
+                            >
+                              {genThisUser ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Sparkles className="h-4 w-4" />
+                              )}
+                              {genThisUser ? 'Generating…' : '✨ Send AI Welcome'}
+                            </motion.button>
+                            <ChevronRight className="inline h-4 w-4 text-slate-300 transition-colors group-hover:text-teal-500" />
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                : null}
+              {adminMainTab === 'all'
+                ? filteredUsers.map((u) => {
                 const seg = leadGenSegment.byUid[u.id];
                 const segShort = seg === 'ghost' ? 'Ghost' : seg === 'power' ? 'Power' : 'Irregular';
                 const sortMs = getUserListSortTimeMs(u as any, transactions);
@@ -2719,6 +3335,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                       )}
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
+                          <UserDeviceOsIcon deviceInfo={(u as { deviceInfo?: AdminDeviceInfo }).deviceInfo} />
                           <GoldLeadStar show={lm?.tier === 'gold'} />
                           <p className="font-bold text-slate-800 dark:text-white">{u.displayName || 'Anonymous'}</p>
                         </div>
@@ -2798,16 +3415,136 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                   </td>
                 </tr>
               );
-              })}
+                })
+                : null}
             </tbody>
           </table>
-          {filteredUsers.length === 0 && (
+          {((adminMainTab === 'newArrivals' && newArrivalUsers.length === 0) ||
+            (adminMainTab === 'all' && filteredUsers.length === 0)) && (
             <p className="py-12 text-center text-sm text-slate-400">
-              No users match the current filters. Clear filters or adjust search.
+              {adminMainTab === 'newArrivals'
+                ? 'No new arrivals in the last 48 hours with zero transactions.'
+                : 'No users match the current filters. Clear filters or adjust search.'}
             </p>
           )}
         </div>
       </motion.div>
+
+      {/* ── AI welcome preview (New Arrivals) ── */}
+      <AnimatePresence>
+        {welcomeModalUser && (
+          <motion.div
+            key="ai-welcome-modal"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center p-4"
+          >
+            <button
+              type="button"
+              className="absolute inset-0 bg-slate-900/55 backdrop-blur-md"
+              aria-label="Close"
+              onClick={closeWelcomeModal}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 16 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+              className="relative z-10 w-full max-w-lg overflow-hidden rounded-[1.75rem] border border-white/30 bg-white/80 p-6 shadow-[0_24px_80px_-12px_rgba(0,0,0,0.35)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-900/85"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-violet-500/12 via-transparent to-fuchsia-500/12" />
+              <div className="relative">
+                <div className="mb-4 flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500/25 to-fuchsia-500/25 ring-1 ring-violet-400/35">
+                      <Sparkles className="h-5 w-5 text-violet-600 dark:text-violet-300" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-black text-slate-900 dark:text-white">AI welcome push</h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        {welcomeModalUser.displayName || 'User'} · preview & send to notification queue
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeWelcomeModal}
+                    className="rounded-full p-2 text-slate-400 transition-colors hover:bg-slate-200/80 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-white"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                {welcomeModalError && (
+                  <div className="mb-3 flex items-start gap-2 rounded-xl border border-rose-200/80 bg-rose-50/90 px-3 py-2 text-xs font-medium text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-200">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    {welcomeModalError}
+                  </div>
+                )}
+
+                {welcomeGenLoading ? (
+                  <div className="flex flex-col items-center justify-center gap-3 py-10">
+                    <Loader2 className="h-10 w-10 animate-spin text-violet-500" />
+                    <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">Generating welcome with Gemini…</p>
+                  </div>
+                ) : (
+                  <>
+                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Title
+                    </label>
+                    <input
+                      type="text"
+                      value={welcomeTitleDraft}
+                      onChange={(e) => setWelcomeTitleDraft(e.target.value)}
+                      className="mb-4 w-full rounded-xl border border-slate-200 bg-white/90 px-3 py-2.5 text-sm font-bold text-slate-900 shadow-inner dark:border-slate-600 dark:bg-slate-800/90 dark:text-white"
+                      placeholder="Notification title"
+                    />
+                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Message
+                    </label>
+                    <textarea
+                      value={welcomeMessageDraft}
+                      onChange={(e) => setWelcomeMessageDraft(e.target.value)}
+                      rows={6}
+                      className="mb-5 w-full resize-y rounded-xl border border-slate-200 bg-white/90 px-3 py-2.5 text-sm text-slate-800 shadow-inner dark:border-slate-600 dark:bg-slate-800/90 dark:text-slate-100"
+                      placeholder="Welcome message body"
+                    />
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={closeWelcomeModal}
+                        className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={
+                          welcomeSendLoading ||
+                          !welcomeTitleDraft.trim() ||
+                          !welcomeMessageDraft.trim() ||
+                          user?.email !== ADMIN_EMAIL
+                        }
+                        onClick={() => void sendAiWelcomePush()}
+                        className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-600 px-5 py-2.5 text-sm font-black text-white shadow-lg shadow-teal-500/30 transition-all hover:shadow-teal-500/45 disabled:cursor-not-allowed disabled:opacity-45"
+                      >
+                        {welcomeSendLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Send className="h-4 w-4" />
+                        )}
+                        {welcomeSendLoading ? 'Sending…' : 'Send'}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Global campaign modal ── */}
       <AnimatePresence>
@@ -3061,6 +3798,89 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                             {selectedUser.email || '—'}
                           </dd>
                         </div>
+                        {(() => {
+                          const selLi = (selectedUser as { locationIntelligence?: AdminLocationIntel }).locationIntelligence;
+                          const premium = userHasPremiumLocation(selectedUser as { locationIntelligence?: AdminLocationIntel });
+                          const hasAnyGeo =
+                            Boolean(selLi?.city?.trim()) ||
+                            Boolean(selLi?.region?.trim()) ||
+                            Boolean(selLi?.postal?.trim());
+                          return (
+                            <div className="space-y-2 border-b border-slate-200/60 pb-3 dark:border-slate-600/50">
+                              <dt className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-indigo-600 dark:text-violet-300">
+                                <MapPin className="h-3.5 w-3.5 shrink-0" />
+                                Geographic intelligence
+                              </dt>
+                              <dd className="!m-0 space-y-2">
+                                {hasAnyGeo || premium ? (
+                                  <>
+                                    <div className="flex flex-wrap gap-2">
+                                      <LocationIntelNeonBadge kind="City" value={selLi?.city ?? ''} />
+                                      <LocationIntelNeonBadge kind="Region" value={selLi?.region ?? ''} />
+                                      {premium ? <PremiumLocationUserBadge /> : null}
+                                    </div>
+                                    {selLi?.postal?.trim() ? (
+                                      <p className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                                        Postal <span className="font-semibold text-slate-600 dark:text-slate-300">{selLi.postal.trim()}</span>
+                                      </p>
+                                    ) : null}
+                                    {selLi?.lastUpdated ? (
+                                      <p className="text-[9px] text-slate-400 dark:text-slate-500">
+                                        IP snapshot · {selLi.lastUpdated}
+                                      </p>
+                                    ) : null}
+                                  </>
+                                ) : (
+                                  <p className="text-xs leading-relaxed text-slate-400 dark:text-slate-500">
+                                    No IP location captured yet. It is filled from the user&apos;s next active session (ipapi.co).
+                                  </p>
+                                )}
+                              </dd>
+                            </div>
+                          );
+                        })()}
+                        {selectedUserGrowth && (
+                          <div className="space-y-2 border-b border-slate-200/60 pb-3 dark:border-slate-600/50">
+                            <dt className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-fuchsia-600 dark:text-fuchsia-300">
+                              <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                              Growth &amp; intent
+                            </dt>
+                            <dd className="!m-0 space-y-2 text-sm">
+                              <div className="flex justify-between gap-2">
+                                <span className="text-slate-500 dark:text-slate-400">Persona</span>
+                                <span className="max-w-[55%] text-right font-bold text-slate-800 dark:text-white">
+                                  {selectedUserGrowth.personaLabel}
+                                  {selectedUserGrowth.personaBn
+                                    ? ` · ${selectedUserGrowth.personaBn}`
+                                    : ''}
+                                </span>
+                              </div>
+                              <div className="flex justify-between gap-2">
+                                <span className="text-slate-500 dark:text-slate-400">Wishlist</span>
+                                <span className="font-semibold text-slate-800 dark:text-white">
+                                  {selectedUserGrowth.wishlistCount} items
+                                </span>
+                              </div>
+                              <div className="flex justify-between gap-2">
+                                <span className="text-slate-500 dark:text-slate-400">Donations logged</span>
+                                <span className="font-semibold text-slate-800 dark:text-white">
+                                  {selectedUserGrowth.donationCount}
+                                </span>
+                              </div>
+                              <div className="flex justify-between gap-2 border-t border-slate-200/60 pt-2 dark:border-slate-600/50">
+                                <span className="text-slate-500 dark:text-slate-400">Net worth (cash + vault)</span>
+                                <span className="font-black text-cyan-600 dark:text-cyan-300">
+                                  {formatCurrency(selectedUserGrowth.netWorth, language)}
+                                </span>
+                              </div>
+                              <p className="text-[10px] leading-relaxed text-slate-400 dark:text-slate-500">
+                                Cash uses the same all-time ledger as the app; vault from{' '}
+                                <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wealthVault</code> (
+                                {formatCurrency(selectedUserGrowth.vaultTotal, language)})
+                              </p>
+                            </dd>
+                          </div>
+                        )}
                         <div className="space-y-2 border-b border-slate-200/60 pb-3 dark:border-slate-600/50">
                           <dt className="flex items-center gap-1 text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wide">
                             <Phone className="h-3.5 w-3.5" /> মোবাইল (অ্যাডমিন সেট)

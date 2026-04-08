@@ -1,13 +1,11 @@
 /**
  * NotificationBar
  * ─────────────────────────────────────────────────────────────────────────────
- * Facebook-style in-app notification bell for authenticated users.
+ * Bell dropdown: Firestore in-app notifications + push-permission “system” prompts.
  *
- * • Real-time Firestore listener on `users/{userId}/inAppNotifications`
- * • Prominent gradient bell button with ping-glow when unread
- * • Red badge with unread count
- * • Animated dropdown: header, per-item left-accent, sticky "Mark all read" CTA
- * • Clicking a notification opens a glassmorphism detail modal; "Read more" navigates
+ * • Real-time listener on `users/{userId}/inAppNotifications` (Welcome Back, blogs, etc.)
+ * • System row: enable / blocked / requesting push (was Dashboard NotificationBanner)
+ * • Badge = unread in-app count + 1 when a system action is pending
  */
 
 import React, { memo, useEffect, useRef, useState } from 'react';
@@ -22,9 +20,22 @@ import {
   type Timestamp,
 } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
-import { Bell, BellOff, CheckCheck, Heart, Sparkles, X } from 'lucide-react';
+import {
+  Bell,
+  BellOff,
+  BellRing,
+  CheckCheck,
+  CheckCircle2,
+  Heart,
+  Loader2,
+  Sparkles,
+  X,
+} from 'lucide-react';
 import { db } from '../firebaseConfig';
 import { cn } from '../lib/utils';
+import { useLocalization } from '../contexts/LocalizationContext';
+import { useAuth } from '../contexts/AuthContext';
+import { getFcmToken, saveFcmTokenToFirestore } from '../lib/fcmUtils';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -43,6 +54,15 @@ interface InAppNotification {
 interface NotificationBarProps {
   userId: string;
 }
+
+const PUSH_DISMISS_KEY = 'gustimari-notif-dismissed';
+
+type PushBannerState =
+  | 'hidden'
+  | 'idle'
+  | 'requesting'
+  | 'success'
+  | 'denied';
 
 // ── Helper: relative time string ──────────────────────────────────────────────
 
@@ -106,16 +126,71 @@ function avatarGradient(title: string): string {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
+  const { language } = useLocalization();
+  const { user } = useAuth();
   const [notifications, setNotifications] = useState<InAppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [markingAll, setMarkingAll] = useState(false);
   const [selectedNotification, setSelectedNotification] = useState<InAppNotification | null>(null);
+  const [pushState, setPushState] = useState<PushBannerState>('hidden');
   const containerRef = useRef<HTMLDivElement>(null);
   const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(max-width: 639px)').matches : false
   );
+
+  const isBn = language === 'bn';
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window) || !('serviceWorker' in navigator)) {
+      return;
+    }
+    if (sessionStorage.getItem(PUSH_DISMISS_KEY)) return;
+    const perm = Notification.permission;
+    if (perm === 'granted') return;
+    if (perm === 'denied') {
+      setPushState('denied');
+      return;
+    }
+    setPushState('idle');
+  }, []);
+
+  useEffect(() => {
+    if (pushState !== 'success') return;
+    const t = window.setTimeout(() => {
+      setPushState('hidden');
+      sessionStorage.setItem(PUSH_DISMISS_KEY, '1');
+    }, 4000);
+    return () => window.clearTimeout(t);
+  }, [pushState]);
+
+  const handlePushEnable = async () => {
+    setPushState('requesting');
+    try {
+      const token = await getFcmToken();
+      const uid = user?.uid ?? userId;
+      if (token && uid) {
+        await saveFcmTokenToFirestore(uid, token);
+        setPushState('success');
+      } else {
+        setPushState(Notification.permission === 'denied' ? 'denied' : 'idle');
+      }
+    } catch {
+      setPushState(Notification.permission === 'denied' ? 'denied' : 'idle');
+    }
+  };
+
+  const handlePushDismiss = () => {
+    setPushState('hidden');
+    sessionStorage.setItem(PUSH_DISMISS_KEY, '1');
+  };
+
+  const systemAttentionActive =
+    pushState === 'idle' || pushState === 'requesting' || pushState === 'denied';
+  const systemAttentionCount = systemAttentionActive ? 1 : 0;
+  const totalBadgeCount = unreadCount + systemAttentionCount;
+  const showBadge = totalBadgeCount > 0;
 
   // ── Handlers (declared before effects that call close / mark read) ────────
 
@@ -292,7 +367,7 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
       {/* ── Bell trigger button ───────────────────────────────────────────── */}
       <button
         onClick={() => setIsOpen((prev) => !prev)}
-        aria-label={`Notifications${hasUnread ? ` — ${unreadCount} unread` : ''}`}
+        aria-label={`Notifications${showBadge ? ` — ${totalBadgeCount} pending` : ''}`}
         className={cn(
           'group relative flex h-12 w-12 items-center justify-center rounded-2xl transition-all duration-200 active:scale-95',
           'bg-gradient-to-br from-indigo-500 to-violet-600',
@@ -301,8 +376,8 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
           isOpen && 'scale-95 brightness-110 shadow-xl shadow-indigo-500/50'
         )}
       >
-        {/* Ping glow ring — shown when there are unread notifications */}
-        {hasUnread && (
+        {/* Ping glow ring — pending in-app or system */}
+        {showBadge && (
           <>
             <span className="absolute inset-0 animate-ping rounded-2xl bg-indigo-400 opacity-30" />
             <span className="absolute inset-0 rounded-2xl ring-2 ring-indigo-300/60" />
@@ -311,15 +386,15 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
 
         {/* Animated bell */}
         <motion.div
-          animate={hasUnread ? { rotate: [0, -16, 16, -11, 11, -7, 7, 0] } : {}}
+          animate={showBadge ? { rotate: [0, -16, 16, -11, 11, -7, 7, 0] } : {}}
           transition={{ duration: 1.5, repeat: Infinity, repeatDelay: 4 }}
         >
           <Bell className="h-8 w-8 text-white drop-shadow-sm" />
         </motion.div>
 
-        {/* Unread count badge */}
+        {/* Total pending: unread in-app + system row */}
         <AnimatePresence>
-          {hasUnread && (
+          {showBadge && (
             <motion.span
               key="badge"
               initial={{ scale: 0, opacity: 0 }}
@@ -333,7 +408,7 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
                 'shadow-lg shadow-red-500/50 ring-2 ring-white dark:ring-slate-800'
               )}
             >
-              {unreadCount > 9 ? '9+' : unreadCount}
+              {totalBadgeCount > 99 ? '99+' : totalBadgeCount > 9 ? '9+' : totalBadgeCount}
             </motion.span>
           )}
         </AnimatePresence>
@@ -375,17 +450,23 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
                     <Bell className="h-4 w-4 text-white" />
                   </div>
                   <div className="min-w-0">
-                    <h3 className="text-sm font-bold text-white">Notifications</h3>
+                    <h3 className="text-sm font-bold text-white">
+                      {isBn ? 'বিজ্ঞপ্তি' : 'Notifications'}
+                    </h3>
                     <p className="text-[10px] font-medium text-indigo-200">
-                      {hasUnread
-                        ? `${unreadCount} unread message${unreadCount !== 1 ? 's' : ''}`
-                        : 'All caught up'}
+                      {showBadge
+                        ? isBn
+                          ? `${totalBadgeCount}টি অপেক্ষমাণ`
+                          : `${totalBadgeCount} pending item${totalBadgeCount !== 1 ? 's' : ''}`
+                        : isBn
+                          ? 'সব ঠিক আছে'
+                          : 'All caught up'}
                     </p>
                   </div>
                 </div>
 
                 <div className="flex shrink-0 items-center gap-2">
-                  {hasUnread && (
+                  {showBadge && (
                     <span className="hidden items-center gap-1 rounded-full bg-white/20 px-2.5 py-1 text-[10px] font-black tracking-wide text-white backdrop-blur-sm sm:inline-flex">
                       <span className="relative flex h-1.5 w-1.5">
                         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
@@ -410,29 +491,142 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
               </div>
             </div>
 
-            {/* Notification list */}
+            {/* In-app list + system (push permission) */}
             <div className="max-h-[70vh] overflow-y-auto overscroll-contain sm:max-h-[22rem]">
               {loading ? (
                 <div className="flex flex-col items-center justify-center gap-3 py-10">
                   <div className="h-7 w-7 animate-spin rounded-full border-[3px] border-indigo-400 border-t-transparent" />
-                  <p className="text-xs text-slate-600 dark:text-slate-300">Loading notifications…</p>
-                </div>
-              ) : notifications.length === 0 ? (
-                <div className="flex flex-col items-center gap-4 px-6 py-10 text-center">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/30 dark:bg-white/10">
-                    <BellOff className="h-8 w-8 text-slate-500 dark:text-slate-400" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
-                      No notifications yet
-                    </p>
-                    <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-                      You'll see blog updates and tips here
-                    </p>
-                  </div>
+                  <p className="text-xs text-slate-600 dark:text-slate-300">
+                    {isBn ? 'লোড হচ্ছে…' : 'Loading notifications…'}
+                  </p>
                 </div>
               ) : (
-                <ul>
+                <>
+                  {pushState !== 'hidden' && (
+                    <div className="border-b border-white/15 bg-indigo-500/10 px-4 py-3 dark:border-white/10 dark:bg-indigo-500/15">
+                      <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-indigo-700 dark:text-indigo-300">
+                        {isBn ? 'সিস্টেম' : 'System'}
+                      </p>
+
+                      {pushState === 'idle' && (
+                        <div className="flex flex-col gap-3 rounded-xl border border-indigo-200/50 bg-white/40 p-3 dark:border-indigo-500/30 dark:bg-slate-900/40 sm:flex-row sm:items-center">
+                          <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-md">
+                            <motion.div
+                              animate={{ rotate: [0, -14, 14, -10, 10, 0] }}
+                              transition={{ duration: 1.4, repeat: Infinity, repeatDelay: 2.5 }}
+                            >
+                              <BellRing className="h-5 w-5 text-white" />
+                            </motion.div>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-bold text-slate-800 dark:text-white">
+                              {isBn ? 'Notification চালু করুন' : 'Enable notifications'}
+                            </p>
+                            <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">
+                              {isBn
+                                ? 'নতুন টিপস ও আপডেট পেতে'
+                                : 'Get tips and updates in your browser'}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-stretch">
+                            <button
+                              type="button"
+                              onClick={handlePushEnable}
+                              className="rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 px-3 py-2 text-xs font-bold text-white shadow-md active:scale-[0.98]"
+                            >
+                              {isBn ? 'চালু' : 'Enable'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handlePushDismiss}
+                              className="rounded-lg px-2 py-1 text-[10px] font-semibold text-slate-500 hover:bg-white/30 dark:text-slate-400 dark:hover:bg-white/10"
+                            >
+                              {isBn ? 'বন্ধ' : 'Dismiss'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {pushState === 'requesting' && (
+                        <div className="flex items-center gap-3 rounded-xl border border-indigo-200/50 bg-white/40 p-3 dark:border-indigo-500/30 dark:bg-slate-900/40">
+                          <Loader2 className="h-6 w-6 shrink-0 animate-spin text-indigo-600 dark:text-indigo-400" />
+                          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                            {isBn ? 'অনুমতি চলছে…' : 'Requesting permission…'}
+                          </p>
+                        </div>
+                      )}
+
+                      {pushState === 'denied' && (
+                        <div className="flex items-start gap-3 rounded-xl border border-amber-200/60 bg-amber-50/80 p-3 dark:border-amber-500/35 dark:bg-amber-950/30">
+                          <BellOff className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-bold text-slate-800 dark:text-white">
+                              {isBn ? 'Notification বন্ধ' : 'Notifications blocked'}
+                            </p>
+                            <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">
+                              {isBn
+                                ? 'ব্রাউজার সেটিংস থেকে চালু করুন'
+                                : 'Enable this site in browser settings'}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handlePushDismiss}
+                            className="shrink-0 rounded-lg p-1 text-slate-400 hover:bg-amber-200/50 dark:hover:bg-amber-900/40"
+                            aria-label="Dismiss"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      )}
+
+                      {pushState === 'success' && (
+                        <div className="relative overflow-hidden rounded-xl border border-emerald-200/60 bg-emerald-50/90 p-3 dark:border-emerald-500/35 dark:bg-emerald-950/35">
+                          <div className="flex items-center gap-3">
+                            <CheckCircle2 className="h-6 w-6 shrink-0 text-emerald-600" />
+                            <p className="text-sm font-bold text-slate-800 dark:text-white">
+                              {isBn ? 'Notification চালু হয়েছে ✅' : 'Notifications enabled ✅'}
+                            </p>
+                          </div>
+                          <motion.div
+                            className="absolute bottom-0 left-0 h-0.5 bg-emerald-400"
+                            initial={{ width: '100%' }}
+                            animate={{ width: '0%' }}
+                            transition={{ duration: 4, ease: 'linear' }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {notifications.length === 0 && pushState === 'hidden' ? (
+                    <div className="flex flex-col items-center gap-4 px-6 py-10 text-center">
+                      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/30 dark:bg-white/10">
+                        <BellOff className="h-8 w-8 text-slate-500 dark:text-slate-400" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
+                          {isBn ? 'কোনো বিজ্ঞপ্তি নেই' : 'No notifications yet'}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                          {isBn
+                            ? 'ব্লগ ও টিপস এখানে দেখা যাবে'
+                            : "You'll see blog updates and tips here"}
+                        </p>
+                      </div>
+                    </div>
+                  ) : notifications.length === 0 ? (
+                    <p className="px-4 py-3 text-center text-xs text-slate-500 dark:text-slate-400">
+                      {isBn
+                        ? 'আর কোনো সংরক্ষিত বার্তা নেই।'
+                        : 'No saved in-app messages beyond the system row above.'}
+                    </p>
+                  ) : (
+                    <>
+                      <p className="px-4 pb-1 pt-3 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                        {isBn ? 'বার্তা' : 'Messages'}
+                      </p>
+                      <ul>
                   {notifications.map((notif) => (
                     <li
                       key={notif.id}
@@ -520,7 +714,10 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
                       </button>
                     </li>
                   ))}
-                </ul>
+                      </ul>
+                    </>
+                  )}
+                </>
               )}
             </div>
 

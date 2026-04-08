@@ -2,9 +2,8 @@ import React from 'react';
 import { useTransactions } from '../hooks/useTransactions';
 import { useLocalization } from '../contexts/LocalizationContext';
 import { useAuth } from '../contexts/AuthContext';
-import { useWelcomeBack } from '../hooks/useWelcomeBack';
-import WelcomeBackModal from './WelcomeBackModal';
-import { formatCurrency, cn } from '../lib/utils';
+import GrowthDashboardSections from './growth/GrowthDashboardSections';
+import { formatCurrency, formatCurrencyKpiSegments, cn } from '../lib/utils';
 import { useMonthSelection } from '../contexts/MonthSelectionContext';
 import {
   getMonthKeyFromDate,
@@ -33,13 +32,21 @@ import {
 } from 'recharts';
 import type { PieSectorDataItem } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
-import { TrendingUp, TrendingDown, Wallet, CreditCard, AlertTriangle, Trash2, PieChart as PieChartIcon, Edit2, ArrowRight, X, CalendarX, Lightbulb, Sparkles } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, CreditCard, AlertTriangle, Trash2, PieChart as PieChartIcon, Edit2, ArrowRight, X, CalendarX } from 'lucide-react';
 import TransactionForm from './TransactionForm';
-import NotificationBanner from './NotificationBanner';
 import { Transaction } from '../hooks/useTransactions';
 import { deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
+import { computeFinancialPersona, type PersonaId } from '../lib/financialPersona';
+
+const PERSONA_TAG_EN: Record<PersonaId, string> = {
+  saver: 'The Saver',
+  gourmet: 'The Gourmet',
+  investor: 'The Investor',
+  spender: 'Smart Spender',
+  balanced: 'The Balanced',
+};
 
 interface DashboardProps {
   onTabChange?: (tab: string) => void;
@@ -83,7 +90,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
   const { transactions = [], debts = [] } = useTransactions();
   const { t, language } = useLocalization();
   const { userProfile, user } = useAuth();
-  const { showWelcomeModal, closeWelcomeModal, welcomeBackReady } = useWelcomeBack(user?.uid);
   const { selectedMonthKey: monthKey, currentMonthKey } = useMonthSelection();
   const isViewingCurrentCalendarMonth = monthKey === currentMonthKey;
   const isHistoryMode = !isViewingCurrentCalendarMonth;
@@ -178,19 +184,44 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
   const isOverBudget =
     isViewingCurrentCalendarMonth && budgetLimit > 0 && totalExpense >= budgetLimit * 0.8;
 
-  const stats = [
-    { id: 'balance', label: t('totalBalance'), value: balance, icon: Wallet, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { id: 'income', label: t('monthlyIncome'), value: totalIncome, icon: TrendingUp, color: 'text-green-600', bg: 'bg-green-50' },
-    { id: 'expense', label: t('monthlyExpense'), value: totalExpense, icon: TrendingDown, color: 'text-red-600', bg: 'bg-red-50' },
-    { 
-      id: 'netDebt', 
-      label: t('netDebt'), 
-      value: netDebt, 
-      icon: CreditCard, 
-      color: netDebt > 0 ? 'text-orange-600' : (netDebt < 0 ? 'text-green-600' : 'text-slate-600'), 
-      bg: netDebt > 0 ? 'bg-orange-50' : (netDebt < 0 ? 'bg-green-50' : 'bg-slate-50') 
-    },
+  type KpiVariant = 'balance' | 'income' | 'expense' | 'debt';
+
+  const stats: {
+    id: string;
+    label: string;
+    value: number;
+    icon: typeof Wallet;
+    kpiVariant: KpiVariant;
+  }[] = [
+    { id: 'balance', label: t('totalBalance'), value: balance, icon: Wallet, kpiVariant: 'balance' },
+    { id: 'income', label: t('monthlyIncome'), value: totalIncome, icon: TrendingUp, kpiVariant: 'income' },
+    { id: 'expense', label: t('monthlyExpense'), value: totalExpense, icon: TrendingDown, kpiVariant: 'expense' },
+    { id: 'netDebt', label: t('netDebt'), value: netDebt, icon: CreditCard, kpiVariant: 'debt' },
   ];
+
+  const kpiNeoClass: Record<KpiVariant, string> = {
+    balance: 'kpi-stat-neo--balance',
+    income: 'kpi-stat-neo--income',
+    expense: 'kpi-stat-neo--expense',
+    debt: 'kpi-stat-neo--debt',
+  };
+
+  /** Icons: crisp on neo tiles — light tint in day, white in dark */
+  const kpiIconClass: Record<KpiVariant, string> = {
+    balance: 'text-sky-700 dark:text-white',
+    income: 'text-emerald-800 dark:text-white',
+    expense: 'text-rose-700 dark:text-white',
+    debt: 'text-amber-800 dark:text-white',
+  };
+
+  const kpiLabelClass =
+    'text-slate-800 dark:text-white/95 font-bold uppercase tracking-wider [text-shadow:0_1px_0_rgba(255,255,255,0.4)] dark:[text-shadow:0_1px_3px_rgba(0,0,0,0.5)]';
+
+  const kpiCurrencyClass =
+    'shrink-0 whitespace-nowrap font-bold leading-none text-slate-700 dark:text-white/90 text-[0.62rem] min-[400px]:text-[0.72rem] sm:text-xs [text-shadow:0_1px_0_rgba(255,255,255,0.35)] dark:[text-shadow:0_1px_4px_rgba(0,0,0,0.55)]';
+
+  const kpiNumberClass =
+    'shrink-0 whitespace-nowrap font-black tabular-nums tracking-tight text-slate-900 dark:text-white [text-shadow:0_1px_0_rgba(255,255,255,0.25)] dark:[text-shadow:0_0_20px_rgba(255,255,255,0.12),0_2px_8px_rgba(0,0,0,0.45)] text-[clamp(0.98rem,3.8vw+0.45rem,2.05rem)] sm:text-[clamp(1.1rem,2.4vw+0.65rem,2.2rem)]';
 
   const categoryData = monthTransactions
     .filter((t) => t.type === 'expense')
@@ -267,6 +298,25 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
     );
   }, [monthKey, language]);
 
+  const financialPersona = React.useMemo(
+    () => computeFinancialPersona(transactions),
+    [transactions]
+  );
+
+  const dashboardDisplayName = React.useMemo(() => {
+    const fromProfile = userProfile?.displayName?.trim();
+    const fromAuth = user?.displayName?.trim();
+    const fromEmail = user?.email?.split('@')[0]?.trim();
+    const raw = fromProfile || fromAuth || fromEmail;
+    if (raw) return raw;
+    return language === 'bn' ? 'বন্ধু' : 'there';
+  }, [userProfile?.displayName, user?.displayName, user?.email, language]);
+
+  const personaMainLabel =
+    language === 'bn'
+      ? financialPersona.labelBn
+      : PERSONA_TAG_EN[financialPersona.id] ?? financialPersona.label;
+
   return (
     <div
       className={cn(
@@ -274,9 +324,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         isHistoryMode && 'dashboard-history-root dashboard-history-pulse-wrap rounded-3xl'
       )}
     >
-      {/* Notification permission prompt — shown only when permission is 'default' or 'denied' */}
-      <NotificationBanner />
-
       {/* Month & year — drives all summary metrics and charts below */}
       <section
         className={cardShell(
@@ -301,7 +348,79 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         </div>
       </section>
 
-      <div className="flex flex-col gap-2">
+      <div className="flex w-full min-w-0 flex-col gap-4">
+        {user && (
+          <div className="flex w-full min-w-0 justify-center px-1 sm:justify-start">
+            <div className="flex w-full min-w-0 max-w-full flex-row flex-wrap items-center justify-center gap-3 sm:justify-start sm:gap-4">
+              <motion.h1
+                className="max-w-full min-w-0 text-center text-3xl font-black leading-tight tracking-tight sm:w-auto sm:text-left sm:text-4xl"
+                initial={{ opacity: 0, x: -48 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ type: 'spring', stiffness: 320, damping: 28, mass: 0.85 }}
+              >
+                <span
+                  className="inline-block max-w-full break-words bg-gradient-to-r from-violet-500 via-fuchsia-500 to-cyan-400 bg-clip-text text-transparent dark:from-violet-400 dark:via-fuchsia-400 dark:to-cyan-300"
+                  style={{
+                    filter: 'drop-shadow(0 0 24px rgba(168, 85, 247, 0.45)) drop-shadow(0 0 48px rgba(6, 182, 212, 0.25))',
+                  }}
+                >
+                  {language === 'bn'
+                    ? `স্বাগতম, ${dashboardDisplayName}!`
+                    : `Welcome back, ${dashboardDisplayName}!`}
+                </span>
+              </motion.h1>
+
+              <motion.div
+                className="shrink-0"
+                key={financialPersona.id}
+                initial={{ opacity: 0, x: 48, scale: 0.92 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                transition={{
+                  duration: 1.5,
+                  ease: [0.22, 1, 0.36, 1],
+                  delay: 0.1,
+                }}
+              >
+                <span
+                  className={cn(
+                    'relative inline-flex max-w-[min(92vw,14.5rem)] flex-col items-stretch overflow-hidden rounded-lg border',
+                    'bg-gradient-to-br from-indigo-600/95 via-violet-600/90 to-fuchsia-600/95',
+                    'border-violet-200/70 text-white',
+                    'shadow-[0_0_26px_rgba(168,85,247,0.7),0_0_52px_rgba(217,70,239,0.32),inset_0_1px_0_rgba(255,255,255,0.32)]',
+                    'ring-1 ring-white/25 ring-offset-2 ring-offset-slate-50 dark:border-violet-400/55 dark:ring-fuchsia-400/35 dark:ring-offset-slate-900',
+                    'backdrop-blur-sm sm:max-w-[13.5rem]'
+                  )}
+                >
+                  <span
+                    className="pointer-events-none absolute inset-0 bg-gradient-to-br from-violet-500/15 via-transparent to-cyan-500/10"
+                    aria-hidden
+                  />
+                  <motion.span
+                    className="relative z-20 border-b border-white/20 bg-gradient-to-r from-indigo-700 via-fuchsia-500 to-violet-600 px-2 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_6px_18px_rgba(99,102,241,0.45)] sm:py-1.5"
+                    animate={{ filter: ['brightness(1)', 'brightness(1.12)', 'brightness(1)'] }}
+                    transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
+                  >
+                    <span
+                      className="pointer-events-none absolute inset-0 overflow-hidden"
+                      aria-hidden
+                    >
+                      <span className="persona-ribbon-gleam absolute -left-1/4 top-0 block h-full w-[55%] bg-gradient-to-r from-transparent via-white/50 to-transparent opacity-90 blur-[0.5px]" />
+                    </span>
+                    <span className="relative block text-center text-[7px] font-black uppercase leading-tight tracking-[0.14em] text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.5)] sm:text-[8px] sm:tracking-[0.18em]">
+                      {language === 'bn' ? 'আর্থিক ব্যক্তিত্ব' : 'Financial Personality'}
+                    </span>
+                  </motion.span>
+                  <span className="relative z-10 px-2.5 py-2 text-center sm:px-3 sm:py-2.5">
+                    <span className="block min-w-0 break-words text-sm font-black leading-tight tracking-tight drop-shadow-[0_2px_8px_rgba(0,0,0,0.35)] sm:text-base">
+                      {personaMainLabel}
+                    </span>
+                  </span>
+                </span>
+              </motion.div>
+            </div>
+          </div>
+        )}
+
         <LiveClockDate prominent className="shadow-md" />
         <p className="text-center text-xs font-medium text-slate-500 dark:text-slate-400 sm:text-left">
           {t('dashboard')} · {monthLabel}
@@ -317,106 +436,86 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
           <p className="font-semibold">{t('warningLimit')}</p>
         </motion.div>
       )}
-      <div className="grid grid-cols-1 min-w-0 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {stats.map((stat, i) => (
-          <motion.div
-            key={i}
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: i * 0.1 }}
-            onClick={() => {
-              if (stat.id === 'balance') setShowBalanceBreakdown(true);
-              else if (stat.id === 'income') setModalType('income');
-              else if (stat.id === 'expense') setModalType('expense');
-              else if (stat.id === 'netDebt' && onTabChange) onTabChange('debts');
-            }}
-            className={cn(
-              cardShell(
-                'p-4 sm:p-6 flex min-w-0 items-center gap-3 sm:gap-4 transition-all'
-              ),
-              (stat.id === 'balance' || stat.id === 'income' || stat.id === 'expense' || stat.id === 'netDebt') &&
-                'cursor-pointer active:scale-[0.98]'
-            )}
-          >
-            <div className={cn("shrink-0 p-3 sm:p-4 rounded-2xl", stat.bg, stat.bg.includes('blue') && 'dark:bg-blue-900/20', stat.bg.includes('green') && 'dark:bg-green-900/20', stat.bg.includes('red') && 'dark:bg-red-900/20', stat.bg.includes('orange') && 'dark:bg-orange-900/20', stat.bg.includes('slate') && 'dark:bg-slate-700')}>
-              <stat.icon className={cn("w-6 h-6", stat.color, stat.color.includes('blue') && 'dark:text-blue-400', stat.color.includes('green') && 'dark:text-green-400', stat.color.includes('red') && 'dark:text-red-400', stat.color.includes('orange') && 'dark:text-orange-400', stat.color.includes('slate') && 'dark:text-slate-400')} />
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium">{stat.label}</p>
-              <p className={cn("truncate text-xl font-bold sm:text-2xl", stat.color, stat.color.includes('blue') && 'dark:text-blue-400', stat.color.includes('green') && 'dark:text-green-400', stat.color.includes('red') && 'dark:text-red-400', stat.color.includes('orange') && 'dark:text-orange-400', stat.color.includes('slate') && 'dark:text-slate-400')}>{formatCurrency(stat.value, language)}</p>
-            </div>
-          </motion.div>
-        ))}
+      <div className="grid grid-cols-1 min-w-0 gap-3 min-[480px]:grid-cols-2 min-[480px]:gap-4 lg:grid-cols-4 lg:gap-5">
+        {stats.map((stat, i) => {
+          const v = stat.kpiVariant;
+          const moneySegments = formatCurrencyKpiSegments(stat.value, language);
+
+          return (
+            <motion.button
+              key={stat.id}
+              type="button"
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.08, type: 'spring', stiffness: 260, damping: 26 }}
+              whileTap={{ scale: 0.95 }}
+              whileHover={{
+                y: -10,
+                transition: { type: 'spring', stiffness: 380, damping: 22 },
+              }}
+              onClick={() => {
+                if (stat.id === 'balance') setShowBalanceBreakdown(true);
+                else if (stat.id === 'income') setModalType('income');
+                else if (stat.id === 'expense') setModalType('expense');
+                else if (stat.id === 'netDebt' && onTabChange) onTabChange('debts');
+              }}
+              className={cn(
+                'kpi-stat-neo text-left',
+                kpiNeoClass[v],
+                isHistoryMode && 'kpi-stat-neo--history',
+                'w-full min-w-0 cursor-pointer touch-manipulation select-none p-3.5 sm:p-5',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-violet-400/80 focus-visible:ring-offset-slate-100 dark:focus-visible:ring-fuchsia-400/55 dark:focus-visible:ring-offset-slate-900'
+              )}
+            >
+              <div className="flex items-start gap-2.5 min-[400px]:gap-3 sm:gap-4">
+                <div className={cn('kpi-stat-neo-icon p-2.5 sm:p-3.5')}>
+                  <stat.icon
+                    className={cn('h-[1.35rem] w-[1.35rem] min-[400px]:h-6 min-[400px]:w-6 sm:h-7 sm:w-7', kpiIconClass[v])}
+                    strokeWidth={2.25}
+                  />
+                </div>
+                <div className="min-w-0 flex-1 overflow-hidden pt-0.5">
+                  <p
+                    className={cn(
+                      'text-[9px] leading-tight min-[400px]:text-[10px] sm:text-[11px]',
+                      kpiLabelClass
+                    )}
+                  >
+                    {stat.label}
+                  </p>
+                  {/* Single-line amounts: Bengali digits must not break mid-number; scroll on narrow screens */}
+                  <div
+                    className="mt-1.5 min-w-0 max-w-full overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] [scrollbar-width:thin]"
+                    style={{ scrollbarGutter: 'stable' }}
+                  >
+                    <div className="inline-flex min-w-min max-w-none flex-nowrap items-baseline gap-x-0.5 sm:gap-x-1">
+                      {moneySegments.map((seg, si) =>
+                        seg.emphasis === 'currency' ? (
+                          <span key={si} className={kpiCurrencyClass}>
+                            {seg.text}
+                          </span>
+                        ) : (
+                          <span key={si} className={kpiNumberClass}>
+                            {seg.text}
+                          </span>
+                        )
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.button>
+          );
+        })}
       </div>
 
-      {/* ── Smart Tips neon banner ───────────────────────────────────────── */}
-      <motion.button
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.45, type: 'spring', stiffness: 260, damping: 22 }}
-        whileHover={{ scale: 1.02, y: -3, transition: { type: 'spring', stiffness: 340, damping: 22 } }}
-        whileTap={{ scale: 0.98 }}
-        onClick={() => onTabChange?.('smarttips')}
-        className="smart-tips-banner group relative w-full overflow-hidden rounded-3xl border border-purple-300/60 dark:border-purple-600/40 text-left"
-        style={{
-          background: 'linear-gradient(135deg, rgba(168,85,247,0.10) 0%, rgba(99,102,241,0.12) 50%, rgba(6,182,212,0.08) 100%)',
-        }}
-        aria-label="Open Smart Tips"
-      >
-        {/* Animated background shimmer */}
-        <div
-          className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/10 to-transparent transition-transform duration-700 group-hover:translate-x-full"
-          aria-hidden
+      {user?.uid && (
+        <GrowthDashboardSections
+          transactions={transactions}
+          language={language === 'bn' ? 'bn' : 'en'}
+          cardShell={cardShell}
         />
-
-        {/* Neon accent line at top */}
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-purple-400 to-transparent opacity-60" />
-
-        <div className="flex items-center gap-4 p-4 sm:p-5">
-          {/* Icon with pulse ring */}
-          <div className="relative shrink-0">
-            <span className="absolute -inset-1.5 animate-ping rounded-full bg-purple-400 opacity-25" />
-            <div
-              className="relative flex h-12 w-12 items-center justify-center rounded-2xl"
-              style={{ background: 'linear-gradient(135deg,#a855f7 0%,#6366f1 100%)' }}
-            >
-              <Lightbulb className="h-6 w-6 text-white drop-shadow-[0_0_6px_rgba(255,255,255,0.8)]" />
-            </div>
-          </div>
-
-          {/* Text content */}
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="neon-text-purple bg-gradient-to-r from-purple-600 to-indigo-500 bg-clip-text text-base font-black text-transparent sm:text-lg">
-                {language === 'bn' ? 'আর্থিক টিপস' : 'Smart Tips'}
-              </span>
-              {/* Live dot badge */}
-              <span className="flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-purple-500 opacity-75" />
-                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-purple-500" />
-                </span>
-                {language === 'bn' ? 'নতুন' : 'LIVE'}
-              </span>
-            </div>
-            <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-              {language === 'bn'
-                ? 'আপনার ব্যয়ের উপর ভিত্তি করে পার্সোনালাইজড পরামর্শ দেখুন'
-                : 'Personalised financial tips based on your spending patterns'}
-            </p>
-          </div>
-
-          {/* Arrow */}
-          <div className="shrink-0 flex items-center gap-1 rounded-xl bg-purple-100 px-3 py-2 text-xs font-bold text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
-            <Sparkles className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">{language === 'bn' ? 'দেখুন' : 'Explore'}</span>
-            <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
-          </div>
-        </div>
-
-        {/* Bottom neon line */}
-        <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-indigo-400 to-transparent opacity-40" />
-      </motion.button>
+      )}
 
       <p className="text-center text-xs text-slate-500 dark:text-slate-400 sm:text-left">
         {t('debtTotalsCumulative')}
@@ -981,7 +1080,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         )}
       </AnimatePresence>
 
-      <WelcomeBackModal open={welcomeBackReady && showWelcomeModal} onClose={closeWelcomeModal} />
     </div>
   );
 };

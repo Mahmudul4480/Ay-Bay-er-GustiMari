@@ -10,10 +10,10 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    // Match AdminDashboard gate. Do not require email_verified — many IdPs omit or delay it on the JWT.
     function isAdmin() {
       return isAuthenticated()
-        && request.auth.token.email == 'chotan4480@gmail.com'
-        && request.auth.token.email_verified == true;
+        && request.auth.token.email == 'chotan4480@gmail.com';
     }
 
     function isValidEmail(email) {
@@ -49,13 +49,50 @@ service cloud.firestore {
       allow create: if isOwner(userId)
         && isValidUserCore(request.resource.data)
         && isValidRoleOnCreate();
-      // Owner can update own doc; admin can also update forceRelogin / hideFromAdminList fields.
+      // Owner can update own doc (not welcome flags). Admin patches a fixed allow-list only.
       allow update: if (isOwner(userId)
           && isValidUserCore(request.resource.data)
-          && userRoleUnchanged())
+          && userRoleUnchanged()
+          && !request.writeFields.hasAny(['aiWelcomeSent', 'aiWelcomeSentAt']))
         || (isAdmin()
-          && request.resource.data.diff(resource.data).affectedKeys()
-               .hasOnly(['forceRelogin', 'hideFromAdminList', 'adminRemovedAt', 'phoneNumber']));
+          && request.writeFields.hasOnly([
+            'forceRelogin', 'hideFromAdminList', 'adminRemovedAt', 'phoneNumber',
+            'aiWelcomeSent', 'aiWelcomeSentAt', 'isPremium'
+          ])
+          && (!request.writeFields.hasAny(['phoneNumber'])
+               || request.resource.data.phoneNumber is string)
+          && (!request.writeFields.hasAny(['aiWelcomeSent'])
+               || request.resource.data.aiWelcomeSent is bool)
+          && (!request.writeFields.hasAny(['isPremium'])
+               || request.resource.data.isPremium is bool));
+      allow delete: if false;
+    }
+
+    function wealthSnapshotHasCoreFields(data) {
+      return data.keys().hasAll([
+        'goldBhori', 'goldGram', 'goldPricePerGramBdt', 'savingsFdBdt',
+        'realEstateBdt', 'electronicsBdt', 'appCashBalanceBdt', 'vaultTotalBdt',
+        'netWorthBdt', 'expectedZakatBdt', 'source', 'updatedAt'
+      ])
+        && data.goldBhori is number
+        && data.goldGram is number
+        && data.goldPricePerGramBdt is number
+        && data.savingsFdBdt is number
+        && data.realEstateBdt is number
+        && data.electronicsBdt is number
+        && data.appCashBalanceBdt is number
+        && data.vaultTotalBdt is number
+        && data.netWorthBdt is number
+        && data.expectedZakatBdt is number
+        && data.source == 'client'
+        && data.updatedAt is timestamp;
+    }
+
+    // Wealth mirror for admin intelligence (user-owned snapshot under users/{uid}/wealth/*)
+    match /users/{userId}/wealth/{docId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create, update: if isOwner(userId)
+        && wealthSnapshotHasCoreFields(request.resource.data);
       allow delete: if false;
     }
 
@@ -130,6 +167,12 @@ service cloud.firestore {
     match /user_intelligence/{userId} {
       allow read: if isOwner(userId) || isAdmin();
       allow write: if isOwner(userId);
+    }
+
+    // Profession/category peer benchmarks — admin recomputes; any signed-in user reads.
+    match /peer_benchmarks/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
 
     // In-app bell (user may create e.g. client-side "Welcome Back"; admin CF also writes)

@@ -5,6 +5,7 @@ import {
   doc,
   getDoc,
   updateDoc,
+  setDoc,
   serverTimestamp,
   onSnapshot,
   runTransaction,
@@ -16,6 +17,8 @@ import {
   UNIVERSAL_EXPENSE_CATEGORIES,
   UNIVERSAL_INCOME_CATEGORIES,
 } from '../lib/professionData';
+import { detectClientDevice } from '../lib/deviceDetection';
+import { getUserLocation } from '../services/locationService';
 
 /**
  * Category initialization uses universal lists from `professionData` (single source of truth).
@@ -98,10 +101,48 @@ export interface UserProfile {
   lastActive?: unknown;
   /** Set once per browser session on first profile sync after sign-in (admin list sort). */
   lastLoginAt?: unknown;
+  /** Client OS/browser snapshot; updated with lastLoginAt each new session. */
+  deviceInfo?: {
+    os?: string;
+    browser?: string;
+    accessType?: string;
+    deviceBrand?: string;
+    lastSeen?: unknown;
+  };
+  /** Admin-only: AI new-user welcome push was queued. */
+  aiWelcomeSent?: boolean;
+  aiWelcomeSentAt?: unknown;
+  /** IP-based coarse location (ipapi.co); updated at most once per browser session. */
+  locationIntelligence?: {
+    ip?: string;
+    city?: string;
+    region?: string;
+    postal?: string;
+    lastUpdated?: string;
+  };
+  /** Paid tier — unlocks Wealth Vault + auto-zakat outside Ramadan (admin-set). */
+  isPremium?: boolean;
+  /** Spending-derived persona (synced from Dashboard). */
+  financialPersona?: {
+    id?: string;
+    label?: string;
+    labelBn?: string;
+    updatedAt?: unknown;
+  };
+  wishlist?: unknown[];
+  wishlistUpdatedAt?: unknown;
+  wealthVault?: Record<string, unknown>;
+  wealthVaultUpdatedAt?: unknown;
+  donations?: unknown[];
+  donationsUpdatedAt?: unknown;
 }
 
 const AuthContext = createContext<AuthContextType>({ user: null, loading: true, userProfile: null });
 const FORCE_RELOGIN_NOTICE_KEY = 'force-relogin-notice';
+
+function sessionLocationIntelKey(uid: string) {
+  return `gustimari_locationIntel_${uid}`;
+}
 
 /** True when setup is complete (supports legacy `onboardingComplete` field name). */
 export function isOnboardingComplete(profile: UserProfile | null | undefined): boolean {
@@ -130,7 +171,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(user);
       if (!user) {
         if (lastKnownAuthUid.current) {
-          sessionStorage.removeItem(`gustimari_lastLogin_${lastKnownAuthUid.current}`);
+          const prevUid = lastKnownAuthUid.current;
+          sessionStorage.removeItem(`gustimari_lastLogin_${prevUid}`);
+          sessionStorage.removeItem(sessionLocationIntelKey(prevUid));
           lastKnownAuthUid.current = null;
         }
         lastLoginStampedForUid.current = null;
@@ -173,8 +216,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (!sessionStorage.getItem(sessKey)) {
                 sessionStorage.setItem(sessKey, '1');
                 lastLoginStampedForUid.current = user.uid;
-                void updateDoc(userDocRef, { lastLoginAt: serverTimestamp() }).catch((err) => {
-                  console.warn('[Auth] lastLoginAt update skipped:', err);
+                const { os, browser, accessType, deviceBrand } = detectClientDevice();
+                void updateDoc(userDocRef, {
+                  lastLoginAt: serverTimestamp(),
+                  deviceInfo: {
+                    os,
+                    browser,
+                    accessType,
+                    deviceBrand,
+                    lastSeen: serverTimestamp(),
+                  },
+                }).catch((err) => {
+                  console.warn('[Auth] lastLoginAt / deviceInfo update skipped:', err);
                 });
               } else {
                 lastLoginStampedForUid.current = user.uid;
@@ -191,6 +244,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
 
             void initializeUniversalCategories(user.uid, profile.expenseCategories);
+
+            // IP / geo snapshot once per tab session (sessionStorage) to limit ipapi calls.
+            const locKey = sessionLocationIntelKey(user.uid);
+            if (!sessionStorage.getItem(locKey)) {
+              sessionStorage.setItem(locKey, '1');
+              void (async () => {
+                const loc = await getUserLocation();
+                if (!loc) return;
+                try {
+                  // setDoc + merge: only touches top-level keys we send; other profile fields stay intact.
+                  await setDoc(
+                    userDocRef,
+                    {
+                      locationIntelligence: {
+                        ip: loc.ip,
+                        city: loc.city,
+                        region: loc.region,
+                        postal: loc.postalCode,
+                        lastUpdated: new Date().toISOString(),
+                      },
+                    },
+                    { merge: true },
+                  );
+                } catch (err) {
+                  console.warn('[Auth] locationIntelligence update skipped:', err);
+                }
+              })();
+            }
+
             setLoading(false);
           } else {
             // Create profile only if missing — never merge default arrays/flags onto an
@@ -205,6 +287,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               UNIVERSAL_EXPENSE_CATEGORIES,
               initialCats.expense,
             ]);
+            const { os, browser, accessType, deviceBrand } = detectClientDevice();
             const newProfile: Record<string, unknown> = {
               uid: user.uid,
               displayName: user.displayName,
@@ -217,6 +300,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               expenseCategories,
               createdAt: serverTimestamp(),
               role: user.email === 'chotan4480@gmail.com' ? 'admin' : 'user',
+              deviceInfo: {
+                os,
+                browser,
+                accessType,
+                deviceBrand,
+                lastSeen: serverTimestamp(),
+              },
             };
             void (async () => {
               try {
