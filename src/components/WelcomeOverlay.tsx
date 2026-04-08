@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth, isOnboardingComplete } from '../contexts/AuthContext';
 
 const WELCOME_IMAGE = 'https://i.postimg.cc/KFrrzxzv/welcome.png';
 
@@ -15,7 +15,7 @@ const WelcomeOverlay: React.FC = () => {
   const shouldShow =
     !loading &&
     !!user &&
-    userProfile?.onboardingCompleted === true;
+    isOnboardingComplete(userProfile);
 
   const displayName =
     user?.displayName ||

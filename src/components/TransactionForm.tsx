@@ -11,6 +11,7 @@ import { cn } from '../lib/utils';
 import { Transaction } from '../hooks/useTransactions';
 import { useTransactionFeedback } from '../contexts/TransactionFeedbackContext';
 import { updateUserIntelligence } from '../lib/userIntelligence';
+import { mergeMarketingTagsFromTexts } from '../lib/marketingTagsSync';
 
 interface TransactionFormProps {
   onClose: () => void;
@@ -128,6 +129,7 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, initialType,
             );
           }
         }
+        mergeMarketingTagsFromTexts(user.uid, [savedCategory, note]).catch(() => {});
         onClose();
       } catch (err) {
         handleFirestoreError(err, transaction ? OperationType.UPDATE : OperationType.CREATE, transaction ? `transactions/${transaction.id}` : 'transactions');

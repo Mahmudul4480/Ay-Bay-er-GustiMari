@@ -1,6 +1,10 @@
 /**
  * Irregular user = last app open (lastActive) was >= 7 days ago.
  * On Dashboard: Welcome Back modal + in-app notification + lastActive refresh.
+ *
+ * All user-doc writes use `updateDoc` / `batch.update` with only `lastActive` (and
+ * notification subcollection docs) — never `setDoc` without merge, so phoneNumber,
+ * profession, and onboarding flags cannot be wiped by this hook.
  */
 
 import { useEffect, useState, useCallback, useRef } from 'react';

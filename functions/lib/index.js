@@ -54,10 +54,11 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.processNotificationQueue = void 0;
+exports.onDebtWriteSyncMarketingTags = exports.onTransactionWriteSyncMarketingTags = exports.processNotificationQueue = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const v2_1 = require("firebase-functions/v2");
+const intelligenceKeywords_1 = require("./intelligenceKeywords");
 // ── Admin SDK initialisation ──────────────────────────────────────────────────
 // When deployed to Firebase, `initializeApp()` with no arguments automatically
 // picks up the project credentials from the runtime environment.
@@ -242,6 +243,65 @@ exports.processNotificationQueue = (0, firestore_1.onDocumentCreated)({
             });
         }
         await markStatus(docRef, "failed", { error: errMsg, fcmErrorCode: errCode });
+    }
+});
+// ── Intelligence Keyword Scanner → users.marketingTags ────────────────────────
+exports.onTransactionWriteSyncMarketingTags = (0, firestore_1.onDocumentWritten)({
+    document: "transactions/{txId}",
+    region: "asia-south1",
+}, async (event) => {
+    const snap = event.data?.after;
+    if (!snap?.exists)
+        return;
+    const d = snap.data();
+    if (!d)
+        return;
+    const userId = d.userId;
+    if (!userId)
+        return;
+    const text = [d.category, d.note].filter(Boolean).join("\n");
+    const tags = (0, intelligenceKeywords_1.scanForIntelligence)(text);
+    if (tags.length === 0)
+        return;
+    try {
+        await db.collection("users").doc(userId).update({
+            marketingTags: admin.firestore.FieldValue.arrayUnion(...tags),
+        });
+    }
+    catch (err) {
+        v2_1.logger.warn("onTransactionWriteSyncMarketingTags failed", {
+            userId,
+            err: String(err),
+        });
+    }
+});
+exports.onDebtWriteSyncMarketingTags = (0, firestore_1.onDocumentWritten)({
+    document: "debts/{debtId}",
+    region: "asia-south1",
+}, async (event) => {
+    const snap = event.data?.after;
+    if (!snap?.exists)
+        return;
+    const d = snap.data();
+    if (!d)
+        return;
+    const userId = d.userId;
+    if (!userId)
+        return;
+    const text = [d.description, d.personName].filter(Boolean).join("\n");
+    const tags = (0, intelligenceKeywords_1.scanForIntelligence)(text);
+    if (tags.length === 0)
+        return;
+    try {
+        await db.collection("users").doc(userId).update({
+            marketingTags: admin.firestore.FieldValue.arrayUnion(...tags),
+        });
+    }
+    catch (err) {
+        v2_1.logger.warn("onDebtWriteSyncMarketingTags failed", {
+            userId,
+            err: String(err),
+        });
     }
 });
 //# sourceMappingURL=index.js.map

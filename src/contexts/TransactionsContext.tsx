@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { useAuth } from './AuthContext';
+import { useAuth, isOnboardingComplete } from './AuthContext';
 import { db } from '../firebaseConfig';
 import { collection, query, where, onSnapshot, Timestamp } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
@@ -34,6 +34,8 @@ export interface Debt {
   status: 'unpaid' | 'paid';
   phoneNumber?: string;
   userId: string;
+  /** True when counterparty is shop / agency / business (not only an individual). */
+  isBusiness?: boolean;
 }
 
 export interface FixedFinance {
@@ -200,7 +202,7 @@ export function TransactionsProvider({ children }: { children: React.ReactNode }
   }, [user]);
 
   useEffect(() => {
-    if (!user || !userProfile || userProfile.onboardingCompleted === false) return;
+    if (!user || !userProfile || !isOnboardingComplete(userProfile)) return;
     if (loading) return;
 
     const monthKey = getCurrentMonthKey();

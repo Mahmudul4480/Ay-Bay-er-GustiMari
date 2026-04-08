@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocalization } from '../contexts/LocalizationContext';
 import { db } from '../firebaseConfig';
-import { doc, setDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import { Phone, TrendingUp, TrendingDown, Plus, Trash2, ArrowRight, CheckCircle, AlertTriangle } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -55,6 +55,17 @@ const Onboarding: React.FC = () => {
     setFixedExpenses(newExpenses);
   };
 
+  /** Persist phone as soon as step 1 completes so redirect / refresh does not lose it. */
+  const persistPhoneToFirestore = async () => {
+    if (!user) return;
+    const trimmed = phoneNumber.trim();
+    try {
+      await updateDoc(doc(db, 'users', user.uid), { phoneNumber: trimmed });
+    } catch {
+      await setDoc(doc(db, 'users', user.uid), { phoneNumber: trimmed }, { merge: true });
+    }
+  };
+
   const handleFinish = async () => {
     if (!user) return;
     setIsSubmitting(true);
@@ -70,16 +81,18 @@ const Onboarding: React.FC = () => {
 
       // 2. Merge into user profile (never full-replace — survives races with Auth bootstrap)
       const trimmedPhone = phoneNumber.trim();
-      await setDoc(
-        doc(db, 'users', user.uid),
-        {
-          phoneNumber: trimmedPhone,
-          onboardingCompleted: true,
-          incomeCategories: newIncomeCategories,
-          expenseCategories: newExpenseCategories,
-        },
-        { merge: true }
-      );
+      const userRef = doc(db, 'users', user.uid);
+      const completionPayload = {
+        phoneNumber: trimmedPhone,
+        onboardingCompleted: true,
+        incomeCategories: newIncomeCategories,
+        expenseCategories: newExpenseCategories,
+      };
+      try {
+        await updateDoc(userRef, completionPayload);
+      } catch {
+        await setDoc(userRef, completionPayload, { merge: true });
+      }
       try {
         sessionStorage.removeItem(ONBOARDING_PHONE_DRAFT_KEY);
       } catch {
@@ -176,14 +189,25 @@ const Onboarding: React.FC = () => {
                     type="tel"
                     value={phoneNumber}
                     onChange={(e) => setPhoneNumber(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') setStep(2); }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        void (async () => {
+                          await persistPhoneToFirestore();
+                          setStep(2);
+                        })();
+                      }
+                    }}
                     placeholder="e.g. +880 1XXX XXXXXX"
                     className="w-full p-5 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-4 focus:ring-blue-500/20 outline-none dark:text-white text-lg font-medium transition-all"
                   />
                 </div>
 
                 <button
-                  onClick={() => setStep(2)}
+                  type="button"
+                  onClick={async () => {
+                    await persistPhoneToFirestore();
+                    setStep(2);
+                  }}
                   className="w-full py-5 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none active:scale-95 flex items-center justify-center gap-2"
                 >
                   Continue <ArrowRight className="w-5 h-5" />

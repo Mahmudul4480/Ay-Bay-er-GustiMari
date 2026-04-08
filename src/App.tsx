@@ -1,5 +1,5 @@
 import React from 'react';
-import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { AuthProvider, useAuth, isOnboardingComplete } from './contexts/AuthContext';
 import { LocalizationProvider, useLocalization } from './contexts/LocalizationContext';
 import { TransactionFeedbackProvider } from './contexts/TransactionFeedbackContext';
 import { TransactionsProvider } from './hooks/useTransactions';
@@ -29,16 +29,16 @@ const ADMIN_EMAIL = 'chotan4480@gmail.com';
 const FORCE_RELOGIN_NOTICE_KEY = 'force-relogin-notice';
 
 function needsProfession(profile: { profession?: string } | null): boolean {
-  if (!profile) return true;
+  if (!profile) return false;
   const p = profile.profession;
   return p == null || String(p).trim() === '';
 }
 
 /** Onboarding সম্পন্ন কিন্তু ফায়ারস্টোরে ফোন নেই (পুরনো বাগ / খালি ঐচ্ছিক ছেড়ে দেওয়া) */
 function needsPhoneNumber(
-  profile: { onboardingCompleted?: boolean; phoneNumber?: string | null } | null
+  profile: { onboardingCompleted?: boolean; onboardingComplete?: boolean; phoneNumber?: string | null } | null
 ): boolean {
-  if (!profile?.onboardingCompleted) return false;
+  if (!isOnboardingComplete(profile)) return false;
   return !String(profile.phoneNumber ?? '').trim();
 }
 
@@ -123,7 +123,7 @@ const AppContent: React.FC = () => {
     }
   }, [isDarkMode]);
 
-  if (loading) {
+  if (loading || (user && userProfile === null)) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 transition-colors">
         <motion.div
@@ -332,7 +332,7 @@ const AppContent: React.FC = () => {
     return <ProfessionSelector />;
   }
 
-  if (userProfile && !userProfile.onboardingCompleted) {
+  if (userProfile && !isOnboardingComplete(userProfile)) {
     return <Onboarding />;
   }
 

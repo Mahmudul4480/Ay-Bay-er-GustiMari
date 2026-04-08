@@ -53,6 +53,11 @@ import {
   UserMinus,
   Ghost,
   Zap,
+  Phone,
+  LineChart,
+  MessageSquare,
+  Mail,
+  MessageCircle,
 } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { useLocalization } from '../contexts/LocalizationContext';
@@ -77,7 +82,130 @@ import {
   queueNotificationForUser,
   queueManualNotificationsForUsers,
 } from '../lib/fcmUtils';
-import { generatePersonalFinanceTip, type DirectNotifyUserType } from '../lib/geminiApi';
+import {
+  generatePersonalFinanceTip,
+  generateReengagementPushForUser,
+  generateAdminUserStrategicInsight,
+  REENGAGEMENT_NOTIFICATION_DISCLAIMER_BN,
+  type DirectNotifyUserType,
+} from '../lib/geminiApi';
+import {
+  buildSmsDraftHref,
+  buildMailtoHref,
+  buildWhatsAppWebHref,
+} from '../lib/adminOutreachLinks';
+import {
+  computeLqi,
+  leadTierFromLqi,
+  isMerchantProspect,
+  LEAD_BADGE_LABELS,
+  merchantProspectLabel,
+  type FinancialNetworkDoc,
+  type LeadTier,
+} from '../lib/leadScoring';
+import {
+  getIntelligenceBucketForTag,
+  MARKETING_TAGS_CATALOG,
+  type IntelligenceBucket,
+} from '../lib/intelligenceKeywords';
+
+type LeadMetricsRow = {
+  lqi: number;
+  tier: LeadTier;
+  merchantProspect: boolean;
+  topCreditors: string;
+  totalBorrowedOutstanding: number;
+};
+
+function LeadGenBadges({ lm, className }: { lm?: LeadMetricsRow; className?: string }) {
+  if (!lm) return <span className="text-slate-400 text-xs">—</span>;
+  const showMerchantExtra = lm.merchantProspect && (lm.tier === 'gold' || lm.tier === 'silver');
+  const primary =
+    lm.tier === 'gold'
+      ? LEAD_BADGE_LABELS.gold
+      : lm.tier === 'silver'
+        ? LEAD_BADGE_LABELS.silver
+        : lm.merchantProspect
+          ? merchantProspectLabel()
+          : null;
+  return (
+    <div className={cn('flex flex-wrap items-center gap-1', className)}>
+      {primary ? (
+        <span
+          className={cn(
+            'rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wide',
+            lm.tier === 'gold' &&
+              'bg-amber-100 text-amber-900 ring-1 ring-amber-300/60 dark:bg-amber-900/45 dark:text-amber-100 dark:ring-amber-700/50',
+            lm.tier === 'silver' &&
+              'bg-slate-200 text-slate-800 ring-1 ring-slate-300/70 dark:bg-slate-600 dark:text-slate-100 dark:ring-slate-500/50',
+            lm.tier === 'standard' &&
+              lm.merchantProspect &&
+              'bg-cyan-100 text-cyan-900 ring-1 ring-cyan-300/50 dark:bg-cyan-900/40 dark:text-cyan-100 dark:ring-cyan-700/40',
+          )}
+        >
+          {primary}
+        </span>
+      ) : (
+        <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500">—</span>
+      )}
+      {showMerchantExtra ? (
+        <span className="rounded-full bg-cyan-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-cyan-900 ring-1 ring-cyan-300/50 dark:bg-cyan-900/40 dark:text-cyan-100 dark:ring-cyan-700/40">
+          {merchantProspectLabel()}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function GoldLeadStar({ show }: { show: boolean }) {
+  if (!show) return null;
+  return (
+    <Star
+      className="h-4 w-4 shrink-0 text-amber-400"
+      style={{
+        transform: 'perspective(40px) rotateX(14deg) rotateY(-22deg)',
+        filter: 'drop-shadow(0 2px 6px rgba(251,191,36,0.95)) drop-shadow(0 1px 0 rgba(146,100,20,0.45))',
+      }}
+      aria-hidden
+    />
+  );
+}
+
+function marketingCyberClasses(bucket: IntelligenceBucket): string {
+  switch (bucket) {
+    case 'premium_banking':
+      return 'border-sky-400/70 bg-sky-950/50 text-sky-100 shadow-[0_0_14px_rgba(56,189,248,0.55),inset_0_1px_0_rgba(255,255,255,0.12)]';
+    case 'premium_signal':
+      return 'border-amber-400/80 bg-amber-950/45 text-amber-100 shadow-[0_0_16px_rgba(251,191,36,0.55),inset_0_1px_0_rgba(255,255,255,0.15)]';
+    case 'digital_wallet':
+      return 'border-fuchsia-500/60 bg-fuchsia-950/40 text-fuchsia-100 shadow-[0_0_14px_rgba(217,70,239,0.45),inset_0_1px_0_rgba(255,255,255,0.1)]';
+    case 'solvency_religious':
+      return 'border-emerald-400/70 bg-emerald-950/45 text-emerald-100 shadow-[0_0_14px_rgba(52,211,153,0.5),inset_0_1px_0_rgba(255,255,255,0.12)]';
+    default:
+      return 'border-slate-500/50 bg-slate-900/60 text-slate-200';
+  }
+}
+
+function MarketingCyberBadges({ tags, className }: { tags: string[]; className?: string }) {
+  if (!tags?.length) {
+    return <span className="text-[11px] font-medium text-slate-500 dark:text-slate-500">—</span>;
+  }
+  return (
+    <div className={cn('flex flex-wrap gap-2', className)}>
+      {tags.map((tag) => (
+        <span
+          key={tag}
+          className={cn(
+            'rounded-lg border px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.12em]',
+            marketingCyberClasses(getIntelligenceBucketForTag(tag)),
+          )}
+        >
+          {tag}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const ADMIN_EMAIL = 'chotan4480@gmail.com';
@@ -162,6 +290,54 @@ function txTimestampMs(t: { date?: unknown }): number | null {
 }
 
 const MS_PER_DAY = 86_400_000;
+
+function firestoreTimeMs(val: unknown): number | null {
+  if (val == null) return null;
+  if (
+    typeof val === 'object' &&
+    val !== null &&
+    'toMillis' in val &&
+    typeof (val as { toMillis: () => number }).toMillis === 'function'
+  ) {
+    try {
+      return (val as { toMillis: () => number }).toMillis();
+    } catch {
+      return null;
+    }
+  }
+  if (
+    typeof val === 'object' &&
+    val !== null &&
+    'toDate' in val &&
+    typeof (val as { toDate: () => Date }).toDate === 'function'
+  ) {
+    try {
+      return (val as { toDate: () => Date }).toDate().getTime();
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function lastTransactionMsForUser(uid: string, txs: any[]): number | null {
+  let last: number | null = null;
+  for (const t of txs) {
+    if (t.userId !== uid) continue;
+    const ms = txTimestampMs(t as { date?: unknown });
+    if (ms != null && (last === null || ms > last)) last = ms;
+  }
+  return last;
+}
+
+/** Newest-first sort: login → lastActive → last tx → created. */
+function getUserListSortTimeMs(u: { id: string } & Record<string, unknown>, txs: any[]): number {
+  const login = firestoreTimeMs(u.lastLoginAt);
+  const active = firestoreTimeMs(u.lastActive);
+  const tx = lastTransactionMsForUser(u.id, txs);
+  const created = firestoreTimeMs(u.createdAt);
+  return Math.max(login ?? 0, active ?? 0, tx ?? 0, created ?? 0, 0);
+}
 
 // ── Category Users Modal ───────────────────────────────────────────────────────
 interface CategoryUser {
@@ -580,7 +756,6 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [loading, setLoading] = useState(true);
 
   // ── Filter state
-  const [leadSegmentTab, setLeadSegmentTab] = useState<'ghost' | 'irregular' | 'power'>('power');
   const [searchTerm, setSearchTerm] = useState('');
   const [incomeMin, setIncomeMin] = useState('');
   const [incomeMax, setIncomeMax] = useState('');
@@ -588,13 +763,32 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [filterCategoryMin, setFilterCategoryMin] = useState('');
   const [filterProfession, setFilterProfession] = useState('');
   const [filterTag, setFilterTag] = useState('');
+  const [filterMarketingTag, setFilterMarketingTag] = useState('');
   const [showFilters, setShowFilters] = useState(false);
 
   // ── Modal state
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
-  const [userTransactions, setUserTransactions] = useState<any[]>([]);
+  const [userInAppNotifs, setUserInAppNotifs] = useState<
+    { id: string; title: string; body: string; read: boolean; createdAt: unknown }[]
+  >([]);
+  const [userInAppNotifsLoading, setUserInAppNotifsLoading] = useState(false);
+  const [userInAppNotifsError, setUserInAppNotifsError] = useState<string | null>(null);
+  const [adminStrategicInsight, setAdminStrategicInsight] = useState<string | null>(null);
+  const [adminStrategicLoading, setAdminStrategicLoading] = useState(false);
+  const [adminStrategicError, setAdminStrategicError] = useState<string | null>(null);
   const [adminActionPendingUid, setAdminActionPendingUid] = useState<string | null>(null);
   const [adminActionError, setAdminActionError] = useState<string | null>(null);
+
+  const [panelPushTitle, setPanelPushTitle] = useState('Ay Bay Er GustiMari');
+  const [panelPushMessage, setPanelPushMessage] = useState('');
+  const [panelPushBlogId, setPanelPushBlogId] = useState('');
+  const [panelPushSending, setPanelPushSending] = useState(false);
+  const [panelPushError, setPanelPushError] = useState<string | null>(null);
+  const [panelPushAiLoading, setPanelPushAiLoading] = useState(false);
+  const [panelAdminOnlyInsight, setPanelAdminOnlyInsight] = useState<string | null>(null);
+  const [panelAdminOnlyLoading, setPanelAdminOnlyLoading] = useState(false);
+  const [panelAdminOnlyError, setPanelAdminOnlyError] = useState<string | null>(null);
+  const [panelBlogList, setPanelBlogList] = useState<{ id: string; title: string }[]>([]);
 
   // ── Category explorer state
   const [categoryModal, setCategoryModal] = useState<{ category: string; type: 'income' | 'expense' } | null>(null);
@@ -613,16 +807,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [inactiveBlogId, setInactiveBlogId] = useState<string | null>(null);
   const [inactiveSendError, setInactiveSendError] = useState<string | null>(null);
   const [inactiveSendDone, setInactiveSendDone] = useState(false);
-
-  // ── Per-user notify modal (notificationQueue → Cloud Function) ─────────────
-  const [notifyUser, setNotifyUser] = useState<any | null>(null);
-  const [notifyTitle, setNotifyTitle] = useState('Ay Bay Er GustiMari');
-  const [notifyMessage, setNotifyMessage] = useState('');
-  const [notifyBlogId, setNotifyBlogId] = useState('');
-  const [notifyBlogList, setNotifyBlogList] = useState<{ id: string; title: string }[]>([]);
-  const [notifySending, setNotifySending] = useState(false);
-  const [notifyError, setNotifyError] = useState<string | null>(null);
-  const [notifyAiLoading, setNotifyAiLoading] = useState(false);
+  const [inactiveAiLoading, setInactiveAiLoading] = useState(false);
 
   // ── Global campaign (segment-targeted bulk notify) ───────────────────────────
   const [globalCampaignOpen, setGlobalCampaignOpen] = useState(false);
@@ -633,6 +818,15 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [globalCampaignBlogList, setGlobalCampaignBlogList] = useState<{ id: string; title: string }[]>([]);
   const [globalCampaignSending, setGlobalCampaignSending] = useState(false);
   const [globalCampaignError, setGlobalCampaignError] = useState<string | null>(null);
+
+  const [adminDebts, setAdminDebts] = useState<any[]>([]);
+  const [financialNetworkDocs, setFinancialNetworkDocs] = useState<any[]>([]);
+  const [fbExportGoldOnly, setFbExportGoldOnly] = useState(false);
+
+  const [adminUserPhoneDraft, setAdminUserPhoneDraft] = useState('');
+  const [adminUserPhoneSaving, setAdminUserPhoneSaving] = useState(false);
+  const [adminUserPhoneError, setAdminUserPhoneError] = useState<string | null>(null);
+  const [adminUserPhoneSaved, setAdminUserPhoneSaved] = useState(false);
 
   // ── Firestore live listeners ─────────────────────────────────────────────────
   useEffect(() => {
@@ -661,9 +855,60 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     return () => { unsubUsers(); unsubTx(); unsubIntelligence(); };
   }, []);
 
-  // Blogs list for Notify + Global Campaign modals
   useEffect(() => {
-    if (!notifyUser && !globalCampaignOpen) return;
+    const unsubD = onSnapshot(
+      collection(db, 'debts'),
+      (snap) => setAdminDebts(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'debts'),
+    );
+    const unsubF = onSnapshot(
+      collection(db, 'financial_network'),
+      (snap) => setFinancialNetworkDocs(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'financial_network'),
+    );
+    return () => {
+      unsubD();
+      unsubF();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedUser?.id) {
+      setAdminUserPhoneDraft('');
+      setAdminUserPhoneError(null);
+      setAdminUserPhoneSaved(false);
+      return;
+    }
+    setAdminUserPhoneDraft(String(selectedUser.phoneNumber ?? '').trim());
+    setAdminUserPhoneError(null);
+    setAdminUserPhoneSaved(false);
+  }, [selectedUser?.id]);
+
+  const saveAdminUserPhone = useCallback(async () => {
+    if (!selectedUser?.id || user?.email !== ADMIN_EMAIL) return;
+    const trimmed = adminUserPhoneDraft.trim();
+    const digits = trimmed.replace(/\D/g, '');
+    if (trimmed.length > 0 && digits.length < 10) {
+      setAdminUserPhoneError('সঠিক মোবাইলের জন্য কমপক্ষে ১০ ডিজিট দিন (খালি রাখলে মুছে যাবে)।');
+      return;
+    }
+    setAdminUserPhoneSaving(true);
+    setAdminUserPhoneError(null);
+    setAdminUserPhoneSaved(false);
+    try {
+      await updateDoc(doc(db, 'users', selectedUser.id), { phoneNumber: trimmed });
+      setSelectedUser((prev) => (prev && prev.id === selectedUser.id ? { ...prev, phoneNumber: trimmed } : prev));
+      setAdminUserPhoneSaved(true);
+    } catch (e: unknown) {
+      setAdminUserPhoneError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAdminUserPhoneSaving(false);
+    }
+  }, [selectedUser, adminUserPhoneDraft, user?.email]);
+
+  // Blogs list for User Monitoring push composer + Global Campaign
+  useEffect(() => {
+    if (!selectedUser && !globalCampaignOpen) return;
     const qBlogs = query(collection(db, 'blogs'), orderBy('createdAt', 'desc'));
     const unsub = onSnapshot(
       qBlogs,
@@ -672,13 +917,74 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           id: d.id,
           title: String((d.data() as { title?: string }).title || 'Untitled'),
         }));
-        setNotifyBlogList(list);
+        setPanelBlogList(list);
         setGlobalCampaignBlogList(list);
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'blogs'),
     );
     return () => unsub();
-  }, [notifyUser, globalCampaignOpen]);
+  }, [selectedUser, globalCampaignOpen]);
+
+  // In-app notification history for the open User Monitoring Board
+  useEffect(() => {
+    const uid = selectedUser?.id;
+    if (!uid) {
+      setUserInAppNotifs([]);
+      setUserInAppNotifsError(null);
+      setUserInAppNotifsLoading(false);
+      return;
+    }
+    setUserInAppNotifsLoading(true);
+    setUserInAppNotifsError(null);
+    const qn = query(
+      collection(db, 'users', uid, 'inAppNotifications'),
+      orderBy('createdAt', 'desc'),
+    );
+    const unsub = onSnapshot(
+      qn,
+      (snap) => {
+        setUserInAppNotifs(
+          snap.docs.map((d) => {
+            const data = d.data() as Record<string, unknown>;
+            return {
+              id: d.id,
+              title: typeof data.title === 'string' ? data.title : '',
+              body: typeof data.body === 'string' ? data.body : '',
+              read: data.read === true,
+              createdAt: data.createdAt ?? null,
+            };
+          }),
+        );
+        setUserInAppNotifsLoading(false);
+      },
+      (err) => {
+        console.error('[Admin] inAppNotifications listener:', err);
+        setUserInAppNotifsError(
+          err instanceof Error ? err.message : 'Could not load notification history.',
+        );
+        setUserInAppNotifsLoading(false);
+      },
+    );
+    return () => unsub();
+  }, [selectedUser?.id]);
+
+  useEffect(() => {
+    setAdminStrategicInsight(null);
+    setAdminStrategicError(null);
+    setAdminStrategicLoading(false);
+  }, [selectedUser?.id]);
+
+  useEffect(() => {
+    setPanelPushTitle('Ay Bay Er GustiMari');
+    setPanelPushMessage('');
+    setPanelPushBlogId('');
+    setPanelPushError(null);
+    setPanelPushAiLoading(false);
+    setPanelPushSending(false);
+    setPanelAdminOnlyInsight(null);
+    setPanelAdminOnlyError(null);
+    setPanelAdminOnlyLoading(false);
+  }, [selectedUser?.id]);
 
   // ── Computed ─────────────────────────────────────────────────────────────────
 
@@ -700,6 +1006,87 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       return d && d.getFullYear() === y && d.getMonth() === m;
     });
   }, [transactions]);
+
+  /** All-time transaction-derived stats for the User Monitoring Board (selected user). */
+  const userMonitoring = useMemo(() => {
+    const uid = selectedUser?.id;
+    if (!uid) return null;
+    const txs = transactions
+      .filter((t: any) => t.userId === uid)
+      .sort((a: any, b: any) => (txTimestampMs(b) ?? 0) - (txTimestampMs(a) ?? 0));
+
+    const allTimeIncome = txs
+      .filter((t: any) => t.type === 'income')
+      .reduce((s: number, t: any) => s + (Number(t.amount) || 0), 0);
+    const allTimeExpense = txs
+      .filter((t: any) => t.type === 'expense')
+      .reduce((s: number, t: any) => s + (Number(t.amount) || 0), 0);
+
+    const expenseByCat: Record<string, number> = {};
+    txs
+      .filter((t: any) => t.type === 'expense')
+      .forEach((t: any) => {
+        const c = (t.category && String(t.category).trim()) || 'Uncategorized';
+        expenseByCat[c] = (expenseByCat[c] || 0) + (Number(t.amount) || 0);
+      });
+    const top3ExpenseCategories = Object.entries(expenseByCat)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([category, amount]) => ({ category, amount }));
+
+    const dayKeys = new Set<string>();
+    let minMs: number | null = null;
+    let maxMs: number | null = null;
+    txs.forEach((t: any) => {
+      const ms = txTimestampMs(t);
+      if (ms == null) return;
+      if (minMs === null || ms < minMs) minMs = ms;
+      if (maxMs === null || ms > maxMs) maxMs = ms;
+      const d = new Date(ms);
+      dayKeys.add(
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+      );
+    });
+    const distinctActiveDays = dayKeys.size;
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    let spanCalendarDays = 1;
+    if (minMs != null) {
+      const firstDay = new Date(minMs);
+      firstDay.setHours(0, 0, 0, 0);
+      spanCalendarDays = Math.max(
+        1,
+        Math.floor((startOfToday.getTime() - firstDay.getTime()) / MS_PER_DAY) + 1,
+      );
+    }
+    const inactiveDaysInWindow = Math.max(0, spanCalendarDays - distinctActiveDays);
+    const weeksInSpan = Math.max(1, spanCalendarDays / 7);
+    const entriesPerWeek = txs.length / weeksInSpan;
+
+    const recentNotes = txs
+      .map((t: any) => (typeof t.note === 'string' ? t.note.trim() : ''))
+      .filter(Boolean)
+      .slice(0, 20);
+
+    const daysSinceLastActivity =
+      maxMs == null ? null : Math.max(0, Math.floor((Date.now() - maxMs) / MS_PER_DAY));
+
+    return {
+      txs,
+      allTimeIncome,
+      allTimeExpense,
+      top3ExpenseCategories,
+      distinctActiveDays,
+      inactiveDaysInWindow,
+      spanCalendarDays,
+      entriesPerWeek,
+      recentNotes,
+      last10Activities: txs.slice(0, 10),
+      daysSinceLastActivity,
+      firstTxMs: minMs,
+      lastTxMs: maxMs,
+    };
+  }, [selectedUser?.id, transactions]);
 
   /** Users enriched with spending stats and behavioural tags (this month). */
   const users = useMemo(() => rawUsers.map((rawUser: any) => {
@@ -727,11 +1114,17 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       if ((catSum('food', 'restaurant', 'dining', 'bazar', 'sukna', 'kaca') / totalExpense) * 100 > 20) tags.push('Gourmet');
     }
 
+    const marketingTagsRaw = rawUser.marketingTags;
+    const marketingTags = Array.isArray(marketingTagsRaw)
+      ? [...new Set(marketingTagsRaw.filter((x: unknown) => typeof x === 'string'))] as string[]
+      : [];
+
     return {
       ...rawUser,
       totalIncome, totalExpense,
       balance: totalIncome - totalExpense,
       categoryBreakdown, topCategory, tags,
+      marketingTags,
       transactionCount: userTx.length,
       savingsRate: totalIncome > 0 ? ((totalIncome - totalExpense) / totalIncome) * 100 : 0,
       subscription: userTx.length > 15 ? 'Premium' : 'Free',
@@ -958,25 +1351,6 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       .map((u) => u.id);
   }, [visibleUsers, leadGenSegment, globalCampaignSegment]);
 
-  /** Direct Notify AI: Ghost / Irregular / Power + whole days since last transaction (all time). */
-  const directNotifyAiContext = useMemo(() => {
-    if (!notifyUser?.id) return null;
-    const uid = notifyUser.id;
-    const seg = leadGenSegment.byUid[uid];
-    const userType: DirectNotifyUserType =
-      seg === 'ghost' ? 'Ghost User' : seg === 'power' ? 'Power User' : 'Irregular User';
-    let lastMs: number | null = null;
-    for (const t of transactions) {
-      const tid = (t as { userId?: string }).userId;
-      if (tid !== uid) continue;
-      const ms = txTimestampMs(t as { date?: unknown });
-      if (ms != null && (lastMs === null || ms > lastMs)) lastMs = ms;
-    }
-    const daysSinceLastEntry =
-      lastMs === null ? null : Math.max(0, Math.floor((Date.now() - lastMs) / MS_PER_DAY));
-    return { userType, daysSinceLastEntry };
-  }, [notifyUser, leadGenSegment, transactions]);
-
   /** Ranked users enriched with all-time behavioral intelligence from user_intelligence collection. */
   const intelligenceRows = useMemo(() => {
     return rawUsers
@@ -1030,6 +1404,64 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       }[];
   }, [userIntelligenceMap, rawUsers]);
 
+  /** AI context for the open User Monitoring Board (push composer + re-engagement). */
+  const selectedUserNotifyContext = useMemo(() => {
+    if (!selectedUser?.id) return null;
+    const uid = selectedUser.id;
+    const seg = leadGenSegment.byUid[uid];
+    const userType: DirectNotifyUserType =
+      seg === 'ghost' ? 'Ghost User' : seg === 'power' ? 'Power User' : 'Irregular User';
+    const intelRow = intelligenceRows.find((r) => r.id === uid);
+    let lastMs: number | null = null;
+    for (const t of transactions) {
+      const tid = (t as { userId?: string }).userId;
+      if (tid !== uid) continue;
+      const ms = txTimestampMs(t as { date?: unknown });
+      if (ms != null && (lastMs === null || ms > lastMs)) lastMs = ms;
+    }
+    const daysSinceLastEntry =
+      lastMs === null ? null : Math.max(0, Math.floor((Date.now() - lastMs) / MS_PER_DAY));
+    return {
+      displayName: selectedUser.displayName || 'বন্ধু',
+      profession: getProfessionLabel(selectedUser.profession),
+      topCategory: intelRow?.topCategory ?? selectedUser.topCategory,
+      userType,
+      daysSinceLastEntry,
+    };
+  }, [selectedUser, leadGenSegment, intelligenceRows, transactions]);
+
+  /**
+   * Inactive campaign AI: same inputs as Lead “Direct notify” — uses the selected user
+   * with the highest days inactive as the profile sample (segment, days since last entry, top category).
+   */
+  const inactiveCampaignAiContext = useMemo(() => {
+    if (inactiveSelectedUids.size === 0) return null;
+    const selectedRows = inactiveUsers.filter((u: any) => inactiveSelectedUids.has(u.id));
+    if (selectedRows.length === 0) return null;
+    const u = selectedRows.reduce((a: any, b: any) => (a.daysInactive >= b.daysInactive ? a : b));
+    const uid = u.id;
+    const seg = leadGenSegment.byUid[uid];
+    const userType: DirectNotifyUserType =
+      seg === 'ghost' ? 'Ghost User' : seg === 'power' ? 'Power User' : 'Irregular User';
+    const intelRow = intelligenceRows.find((r) => r.id === uid);
+    let lastMs: number | null = null;
+    for (const t of transactions) {
+      const tid = (t as { userId?: string }).userId;
+      if (tid !== uid) continue;
+      const ms = txTimestampMs(t as { date?: unknown });
+      if (ms != null && (lastMs === null || ms > lastMs)) lastMs = ms;
+    }
+    const daysSinceLastEntry =
+      lastMs === null ? null : Math.max(0, Math.floor((Date.now() - lastMs) / MS_PER_DAY));
+    return {
+      displayName: u.displayName || 'বন্ধু',
+      profession: getProfessionLabel(u.profession),
+      topCategory: intelRow?.topCategory,
+      userType,
+      daysSinceLastEntry,
+    };
+  }, [inactiveSelectedUids, inactiveUsers, leadGenSegment, intelligenceRows, transactions]);
+
   /** Aggregated custom category list with contributing users, sorted by popularity. */
   const customCategoriesReport = useMemo(() => {
     const catMap: Record<string, { users: { id: string; displayName: string; email: string }[] }> = {};
@@ -1046,20 +1478,103 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       .sort((a, b) => b.users.length - a.users.length);
   }, [userIntelligenceMap, rawUsers]);
 
-  const filteredUsers = useMemo(() => visibleUsers.filter((u) => {
-    if (leadGenSegment.byUid[u.id] !== leadSegmentTab) return false;
-    const term = searchTerm.toLowerCase();
-    if (term && !u.displayName?.toLowerCase().includes(term) && !u.email?.toLowerCase().includes(term)) return false;
-    if (incomeMin && u.totalIncome < Number(incomeMin)) return false;
-    if (incomeMax && u.totalIncome > Number(incomeMax)) return false;
-    if (filterCategory && filterCategoryMin) {
-      const spent = u.categoryBreakdown[filterCategory] || 0;
-      if (spent < Number(filterCategoryMin)) return false;
-    }
-    if (filterProfession && u.profession !== filterProfession) return false;
-    if (filterTag && !u.tags.includes(filterTag)) return false;
-    return true;
-  }), [visibleUsers, leadGenSegment, leadSegmentTab, searchTerm, incomeMin, incomeMax, filterCategory, filterCategoryMin, filterProfession, filterTag]);
+  const filteredUsers = useMemo(() => {
+    const filtered = visibleUsers.filter((u) => {
+      const term = searchTerm.toLowerCase();
+      if (term && !u.displayName?.toLowerCase().includes(term) && !u.email?.toLowerCase().includes(term)) return false;
+      if (incomeMin && u.totalIncome < Number(incomeMin)) return false;
+      if (incomeMax && u.totalIncome > Number(incomeMax)) return false;
+      if (filterCategory && filterCategoryMin) {
+        const spent = u.categoryBreakdown[filterCategory] || 0;
+        if (spent < Number(filterCategoryMin)) return false;
+      }
+      if (filterProfession && u.profession !== filterProfession) return false;
+      if (filterTag && !u.tags.includes(filterTag)) return false;
+      if (filterMarketingTag) {
+        const m = (u as { marketingTags?: string[] }).marketingTags ?? [];
+        if (!m.includes(filterMarketingTag)) return false;
+      }
+      return true;
+    });
+    return filtered.sort(
+      (a, b) => getUserListSortTimeMs(b as any, transactions) - getUserListSortTimeMs(a as any, transactions),
+    );
+  }, [visibleUsers, searchTerm, incomeMin, incomeMax, filterCategory, filterCategoryMin, filterProfession, filterTag, filterMarketingTag, transactions]);
+
+  const leadMetricsByUid = useMemo(() => {
+    const now = Date.now();
+    const cutoff30 = now - 30 * MS_PER_DAY;
+    const fnByUid: Record<string, FinancialNetworkDoc[]> = {};
+    financialNetworkDocs.forEach((doc: any) => {
+      const uid = doc.userId;
+      if (!uid) return;
+      if (!fnByUid[uid]) fnByUid[uid] = [];
+      fnByUid[uid].push({
+        userId: uid,
+        debtId: doc.debtId,
+        contactName: doc.contactName,
+        contactPhone: doc.contactPhone,
+        isBusiness: doc.isBusiness,
+        debtType: doc.debtType,
+        amount: doc.amount,
+      });
+    });
+
+    const catsByUid: Record<string, Set<string>> = {};
+    transactions.forEach((t: any) => {
+      if (t.type !== 'expense' || !t.category) return;
+      const uid = t.userId;
+      if (!uid) return;
+      if (!catsByUid[uid]) catsByUid[uid] = new Set();
+      catsByUid[uid].add(String(t.category));
+    });
+
+    const tx30ByUid: Record<string, number> = {};
+    transactions.forEach((t: any) => {
+      const ms = txTimestampMs(t);
+      if (ms == null || ms < cutoff30) return;
+      const uid = t.userId;
+      if (!uid) return;
+      tx30ByUid[uid] = (tx30ByUid[uid] || 0) + 1;
+    });
+
+    const out: Record<string, LeadMetricsRow> = {};
+    visibleUsers.forEach((u) => {
+      const uid = u.id;
+      const network = fnByUid[uid] ?? [];
+      const cats = Array.from(catsByUid[uid] ?? []);
+      const tx30 = tx30ByUid[uid] ?? 0;
+      const isPower = leadGenSegment.byUid[uid] === 'power';
+      const lqi = computeLqi({
+        monthlyIncome: u.totalIncome,
+        txCountLast30Days: tx30,
+        isPowerSegment: isPower,
+        expenseCategoryLabels: cats,
+        financialNetwork: network,
+      });
+      const tier = leadTierFromLqi(lqi);
+      const merchant = isMerchantProspect(network);
+
+      const userDebts = adminDebts.filter(
+        (d: any) => d.userId === uid && d.type === 'borrowed' && d.status !== 'paid',
+      );
+      const top3 = [...userDebts].sort((a: any, b: any) => (Number(b.amount) || 0) - (Number(a.amount) || 0)).slice(0, 3);
+      const topCreditors = top3
+        .map((d: any) => `${String(d.personName || '?').replace(/;/g, ',')} (${Number(d.amount) || 0})`)
+        .join(' | ');
+
+      const totalBorrowedOutstanding = userDebts.reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0);
+
+      out[uid] = { lqi, tier, merchantProspect: merchant, topCreditors, totalBorrowedOutstanding };
+    });
+    return out;
+  }, [visibleUsers, transactions, financialNetworkDocs, adminDebts, leadGenSegment]);
+
+  const selectedUserFinancialNetwork = useMemo(() => {
+    const uid = selectedUser?.id;
+    if (!uid) return [] as any[];
+    return financialNetworkDocs.filter((d: any) => d.userId === uid);
+  }, [selectedUser?.id, financialNetworkDocs]);
 
   const tooltipStyle = useCallback((): React.CSSProperties => {
     const dark = document.documentElement.classList.contains('dark');
@@ -1084,26 +1599,40 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   };
 
   const exportFacebookAdsCsv = () => {
+    const rows = fbExportGoldOnly
+      ? filteredUsers.filter((u) => leadMetricsByUid[u.id]?.tier === 'gold')
+      : filteredUsers;
     const lines = [
       ['fn', 'ln', 'email', 'phone'].join(','),
-      ...filteredUsers.map((u) => {
+      ...rows.map((u) => {
         const parts = (u.displayName || '').trim().split(' ');
         return [escapeCsv(parts[0] || ''), escapeCsv(parts.slice(1).join(' ') || ''), escapeCsv(u.email || ''), escapeCsv(u.phoneNumber || '')].join(',');
       }),
     ];
-    downloadCsv(lines.join('\n'), `fb_custom_audience_${format(new Date(), 'yyyy-MM-dd')}.csv`);
+    const tag = fbExportGoldOnly ? 'gold_' : '';
+    downloadCsv(lines.join('\n'), `fb_custom_audience_${tag}${format(new Date(), 'yyyy-MM-dd')}.csv`);
   };
 
   const exportFullCsv = () => {
-    const headers = ['Name', 'Email', 'Phone', 'Profession', 'Monthly Income', 'Monthly Expense', 'Balance', 'Top Category', 'Tags'];
+    const headers = [
+      'Name', 'Email', 'Phone', 'Profession', 'Monthly Income', 'Monthly Expense', 'Balance',
+      'Top Category', 'Tags', 'Marketing Tags', 'LQI Score', 'Lead Tier', 'Merchant Prospect', 'Top 3 Creditors',
+    ];
     const lines = [
       headers.join(','),
-      ...filteredUsers.map((u) => [
-        escapeCsv(u.displayName || 'N/A'), escapeCsv(u.email),
-        escapeCsv(u.phoneNumber || 'N/A'), escapeCsv(getProfessionLabel(u.profession)),
-        u.totalIncome, u.totalExpense, u.balance,
-        escapeCsv(u.topCategory), escapeCsv(u.tags.join('; ')),
-      ].join(',')),
+      ...filteredUsers.map((u) => {
+        const lm = leadMetricsByUid[u.id];
+        const tierLabel =
+          lm?.tier === 'gold' ? 'Gold Lead' : lm?.tier === 'silver' ? 'Silver Lead' : 'Standard';
+        const mTags = ((u as { marketingTags?: string[] }).marketingTags ?? []).join('; ');
+        return [
+          escapeCsv(u.displayName || 'N/A'), escapeCsv(u.email),
+          escapeCsv(u.phoneNumber || 'N/A'), escapeCsv(getProfessionLabel(u.profession)),
+          u.totalIncome, u.totalExpense, u.balance,
+          escapeCsv(u.topCategory), escapeCsv(u.tags.join('; ')), escapeCsv(mTags),
+          lm?.lqi ?? '', tierLabel, lm?.merchantProspect ? 'yes' : 'no', escapeCsv(lm?.topCreditors ?? ''),
+        ].join(',');
+      }),
     ];
     downloadCsv(lines.join('\n'), `full_report_${format(new Date(), 'yyyy-MM-dd')}.csv`);
   };
@@ -1111,13 +1640,44 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const handleUserClick = (u: any) => {
     setAdminActionError(null);
     setSelectedUser(u);
-    setUserTransactions(
-      transactionsThisMonth
-        .filter((t) => t.userId === u.id)
-        .sort((a, b) => (b.date?.seconds || 0) - (a.date?.seconds || 0))
-        .slice(0, 8)
-    );
   };
+
+  const handleAnalyzeUserVibe = useCallback(async () => {
+    if (!selectedUser || !userMonitoring) return;
+    setAdminStrategicLoading(true);
+    setAdminStrategicError(null);
+    try {
+      const lm = leadMetricsByUid[selectedUser.id];
+      const topCats = userMonitoring.top3ExpenseCategories.map((c: { category?: string }) => c.category ?? '').filter(Boolean);
+      const payload = {
+        displayName: selectedUser.displayName || 'Unknown',
+        profession: getProfessionLabel(selectedUser.profession),
+        email: selectedUser.email || '',
+        phone: selectedUser.phoneNumber || '',
+        monthlyIncome: selectedUser.totalIncome,
+        estimatedOutstandingBorrowedDebt: lm?.totalBorrowedOutstanding ?? 0,
+        topExpenseCategories: topCats,
+        lqiScore: lm?.lqi,
+        leadTier: lm?.tier,
+        merchantProspect: lm?.merchantProspect ?? false,
+        allTimeIncome: userMonitoring.allTimeIncome,
+        allTimeExpense: userMonitoring.allTimeExpense,
+        top3ExpenseCategories: userMonitoring.top3ExpenseCategories,
+        transactionCountAllTime: userMonitoring.txs.length,
+        entriesPerWeekApprox: Number(userMonitoring.entriesPerWeek.toFixed(2)),
+        distinctActiveDays: userMonitoring.distinctActiveDays,
+        inactiveCalendarDaysInSpan: userMonitoring.inactiveDaysInWindow,
+        daysSinceLastActivity: userMonitoring.daysSinceLastActivity,
+        recentNotesFromTransactions: userMonitoring.recentNotes,
+      };
+      const text = await generateAdminUserStrategicInsight(JSON.stringify(payload, null, 2));
+      setAdminStrategicInsight(text);
+    } catch (e: unknown) {
+      setAdminStrategicError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAdminStrategicLoading(false);
+    }
+  }, [selectedUser, userMonitoring, leadMetricsByUid]);
 
   const forceUserRelogin = useCallback(async (targetUserId: string) => {
     if (user?.email !== ADMIN_EMAIL) return;
@@ -1133,7 +1693,6 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
       if (selectedUser?.id === targetUserId) {
         setSelectedUser(null);
-        setUserTransactions([]);
       }
     } catch (error) {
       console.error('Failed to force re-login:', error);
@@ -1172,56 +1731,113 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     }
   }, [inactiveSelectedUids, inactiveComposeTitle, inactiveComposeMsg]);
 
-  const openNotifyModal = useCallback((u: any, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setNotifyError(null);
-    setNotifyTitle('Ay Bay Er GustiMari');
-    setNotifyMessage('');
-    setNotifyBlogId('');
-    setNotifyUser(u);
-  }, []);
+  const handlePanelReengageAi = useCallback(async () => {
+    if (!selectedUser || !userMonitoring || !selectedUserNotifyContext) return;
+    setPanelPushAiLoading(true);
+    setPanelPushError(null);
+    try {
+      const { title, message } = await generateReengagementPushForUser({
+        displayName: selectedUserNotifyContext.displayName,
+        profession: selectedUserNotifyContext.profession,
+        topCategory: selectedUserNotifyContext.topCategory,
+        userType: selectedUserNotifyContext.userType,
+        daysSinceLastEntry: selectedUserNotifyContext.daysSinceLastEntry,
+        allTimeIncome: userMonitoring.allTimeIncome,
+        allTimeExpense: userMonitoring.allTimeExpense,
+        top3ExpenseCategories: userMonitoring.top3ExpenseCategories,
+        entriesPerWeekApprox: Number(userMonitoring.entriesPerWeek.toFixed(2)),
+        recentNotesSample: userMonitoring.recentNotes,
+      });
+      setPanelPushTitle(title);
+      setPanelPushMessage(message);
+    } catch (err: unknown) {
+      setPanelPushError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPanelPushAiLoading(false);
+    }
+  }, [selectedUser, userMonitoring, selectedUserNotifyContext]);
 
-  const handleSendNotify = useCallback(async () => {
-    if (!notifyUser) return;
-    if (!notifyTitle.trim() || !notifyMessage.trim()) {
-      setNotifyError('Please add a title and a message.');
+  const handlePanelAdminOnlyInsight = useCallback(async () => {
+    if (!selectedUser || !userMonitoring) return;
+    setPanelAdminOnlyLoading(true);
+    setPanelAdminOnlyError(null);
+    try {
+      const lm = leadMetricsByUid[selectedUser.id];
+      const topCats = userMonitoring.top3ExpenseCategories.map((c: { category?: string }) => c.category ?? '').filter(Boolean);
+      const payload = {
+        purpose: 'admin_only_product_and_retention_advice',
+        displayName: selectedUser.displayName || 'Unknown',
+        profession: getProfessionLabel(selectedUser.profession),
+        email: selectedUser.email || '',
+        phone: selectedUser.phoneNumber || '',
+        segment: selectedUserNotifyContext?.userType ?? 'Unknown',
+        monthlyIncome: selectedUser.totalIncome,
+        estimatedOutstandingBorrowedDebt: lm?.totalBorrowedOutstanding ?? 0,
+        topExpenseCategories: topCats,
+        lqiScore: lm?.lqi,
+        leadTier: lm?.tier,
+        merchantProspect: lm?.merchantProspect ?? false,
+        allTimeIncome: userMonitoring.allTimeIncome,
+        allTimeExpense: userMonitoring.allTimeExpense,
+        top3ExpenseCategories: userMonitoring.top3ExpenseCategories,
+        transactionCountAllTime: userMonitoring.txs.length,
+        entriesPerWeekApprox: Number(userMonitoring.entriesPerWeek.toFixed(2)),
+        distinctActiveDays: userMonitoring.distinctActiveDays,
+        daysSinceLastActivity: userMonitoring.daysSinceLastActivity,
+        recentNotesFromTransactions: userMonitoring.recentNotes,
+      };
+      const text = await generateAdminUserStrategicInsight(JSON.stringify(payload, null, 2));
+      setPanelAdminOnlyInsight(text);
+    } catch (e: unknown) {
+      setPanelAdminOnlyError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPanelAdminOnlyLoading(false);
+    }
+  }, [selectedUser, userMonitoring, selectedUserNotifyContext?.userType, leadMetricsByUid]);
+
+  const handlePanelSendPush = useCallback(async () => {
+    if (!selectedUser) return;
+    if (!panelPushTitle.trim() || !panelPushMessage.trim()) {
+      setPanelPushError('শিরোনাম ও বার্তা লিখুন।');
       return;
     }
-    setNotifySending(true);
-    setNotifyError(null);
+    setPanelPushSending(true);
+    setPanelPushError(null);
     try {
-      await queueNotificationForUser(notifyUser.id, notifyTitle.trim(), notifyMessage.trim(), {
-        blogId: notifyBlogId.trim() || null,
+      await queueNotificationForUser(selectedUser.id, panelPushTitle.trim(), panelPushMessage.trim(), {
+        blogId: panelPushBlogId.trim() || null,
       });
-      setNotifyUser(null);
     } catch (err: unknown) {
-      setNotifyError(err instanceof Error ? err.message : String(err));
+      setPanelPushError(err instanceof Error ? err.message : String(err));
     } finally {
-      setNotifySending(false);
+      setPanelPushSending(false);
     }
-  }, [notifyUser, notifyTitle, notifyMessage, notifyBlogId]);
+  }, [selectedUser, panelPushTitle, panelPushMessage, panelPushBlogId]);
 
-  const handleAiPersonalTip = useCallback(async () => {
-    if (!notifyUser) return;
-    setNotifyAiLoading(true);
-    setNotifyError(null);
-    try {
-      const ctx = directNotifyAiContext;
-      const { title, message } = await generatePersonalFinanceTip({
-        displayName: notifyUser.displayName || 'বন্ধু',
-        profession: getProfessionLabel(notifyUser.profession),
-        topCategory: notifyUser.topCategory,
-        userType: ctx?.userType ?? 'Irregular User',
-        daysSinceLastEntry: ctx?.daysSinceLastEntry ?? null,
-      });
-      setNotifyTitle(title);
-      setNotifyMessage(message);
-    } catch (err: unknown) {
-      setNotifyError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setNotifyAiLoading(false);
+  const handleInactiveAiPersonalTip = useCallback(async () => {
+    const ctx = inactiveCampaignAiContext;
+    if (!ctx) {
+      setInactiveSendError('Select at least one user from the inactive list.');
+      return;
     }
-  }, [notifyUser, directNotifyAiContext]);
+    setInactiveAiLoading(true);
+    setInactiveSendError(null);
+    try {
+      const { title, message } = await generatePersonalFinanceTip({
+        displayName: ctx.displayName,
+        profession: ctx.profession,
+        topCategory: ctx.topCategory,
+        userType: ctx.userType,
+        daysSinceLastEntry: ctx.daysSinceLastEntry,
+      });
+      setInactiveComposeTitle(title);
+      setInactiveComposeMsg(message.slice(0, 120));
+    } catch (err: unknown) {
+      setInactiveSendError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setInactiveAiLoading(false);
+    }
+  }, [inactiveCampaignAiContext]);
 
   const openGlobalCampaign = useCallback(() => {
     setGlobalCampaignError(null);
@@ -1359,7 +1975,16 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             </p>
           </div>
         </div>
-        <div className="flex w-full flex-wrap gap-2 lg:w-auto lg:justify-end">
+        <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center lg:w-auto lg:justify-end">
+          <label className="flex cursor-pointer items-center gap-2 rounded-2xl border border-slate-200 bg-white/90 px-4 py-2.5 text-xs font-bold text-slate-600 shadow-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300">
+            <input
+              type="checkbox"
+              checked={fbExportGoldOnly}
+              onChange={(e) => setFbExportGoldOnly(e.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+            />
+            FB export: Gold leads only
+          </label>
           <motion.button
             type="button"
             whileHover={{ scale: 1.02 }}
@@ -1844,8 +2469,10 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           {/* Behavioral rows */}
           {intelligenceRows.length > 0 && (
             <>
-              <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 px-5 py-3 bg-slate-50/80 dark:bg-slate-900/40 border-b border-slate-100 dark:border-slate-700 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              <div className="grid grid-cols-[minmax(0,1fr)_2.75rem_5.5rem_auto_auto_auto_auto] gap-2 px-5 py-3 bg-slate-50/80 dark:bg-slate-900/40 border-b border-slate-100 dark:border-slate-700 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 <span>User</span>
+                <span className="text-center">LQI</span>
+                <span className="text-center">Lead</span>
                 <span className="text-right w-28 hidden sm:block">Total Spent</span>
                 <span className="text-right w-28">Top Category</span>
                 <span className="text-right w-24 hidden sm:block">Last Spent</span>
@@ -1853,7 +2480,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
               </div>
               <div className="divide-y divide-slate-100 dark:divide-slate-700/60 max-h-72 overflow-y-auto">
                 {intelligenceRows.map((row) => (
-                  <div key={row.id} className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-2 px-5 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors"
+                  <div key={row.id} className="grid grid-cols-[minmax(0,1fr)_2.75rem_5.5rem_auto_auto_auto_auto] items-center gap-2 px-5 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors"
                     onClick={() => {
                       const u = users.find((x) => x.id === row.id);
                       if (u) handleUserClick(u);
@@ -1866,9 +2493,19 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                         : <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-400 to-indigo-500 text-white text-xs font-bold">{(row.displayName || '?').charAt(0).toUpperCase()}</div>
                       }
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-800 dark:text-slate-200 truncate">{row.displayName || 'Unknown'}</p>
+                        <div className="flex items-center gap-1">
+                          <GoldLeadStar show={leadMetricsByUid[row.id]?.tier === 'gold'} />
+                          <p className="text-sm font-semibold text-slate-800 dark:text-slate-200 truncate">{row.displayName || 'Unknown'}</p>
+                        </div>
                         <p className="text-[10px] text-slate-400 truncate">{row.email}</p>
                       </div>
+                    </div>
+
+                    <span className="text-center font-mono text-xs font-black text-violet-600 dark:text-violet-300">
+                      {leadMetricsByUid[row.id]?.lqi ?? '—'}
+                    </span>
+                    <div className="flex justify-center">
+                      <LeadGenBadges lm={leadMetricsByUid[row.id]} />
                     </div>
 
                     <span className="hidden sm:block text-xs font-bold text-red-600 dark:text-red-400 text-right w-28">
@@ -1953,7 +2590,7 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             )}
           >
             <Filter className="h-4 w-4" />
-            Filters {filterProfession || filterTag || incomeMin || incomeMax || filterCategory ? '●' : ''}
+            Filters {filterProfession || filterTag || filterMarketingTag || incomeMin || incomeMax || filterCategory ? '●' : ''}
           </button>
         </div>
 
@@ -1991,6 +2628,24 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                     {activeProfessions.map((p) => <option key={p} value={p}>{getProfessionLabel(p)}</option>)}
                   </select>
                 </div>
+                <div className="space-y-1.5 sm:col-span-2 lg:col-span-4">
+                  <label className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Marketing tag (keyword scanner)
+                  </label>
+                  <select
+                    value={filterMarketingTag}
+                    onChange={(e) => setFilterMarketingTag(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-violet-500 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+                  >
+                    <option value="">Any — show all users</option>
+                    {MARKETING_TAGS_CATALOG.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                    Matches saved <code className="rounded bg-slate-200/80 px-1 dark:bg-slate-700">users.marketingTags</code> (e.g. Zakat Payer, EBL User).
+                  </p>
+                </div>
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-2 px-1">
                 <span className="text-xs font-bold text-slate-400">Behaviour tag:</span>
@@ -2002,8 +2657,8 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                     {tag === '' ? 'All' : (TAG_META[tag]?.emoji ?? '') + ' ' + tag}
                   </button>
                 ))}
-                {(searchTerm || incomeMin || incomeMax || filterCategory || filterProfession || filterTag) && (
-                  <button onClick={() => { setSearchTerm(''); setIncomeMin(''); setIncomeMax(''); setFilterCategory(''); setFilterCategoryMin(''); setFilterProfession(''); setFilterTag(''); }}
+                {(searchTerm || incomeMin || incomeMax || filterCategory || filterProfession || filterTag || filterMarketingTag) && (
+                  <button onClick={() => { setSearchTerm(''); setIncomeMin(''); setIncomeMax(''); setFilterCategory(''); setFilterCategoryMin(''); setFilterProfession(''); setFilterTag(''); setFilterMarketingTag(''); }}
                     className="rounded-full bg-red-100 px-4 py-1.5 text-xs font-bold text-red-600 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400">
                     Clear All
                   </button>
@@ -2014,84 +2669,24 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         </AnimatePresence>
       </div>
 
-      {/* ── Lead Generation Table ── */}
+      {/* ── User directory (single list, newest login / activity first) ── */}
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
         className="neon-card overflow-hidden rounded-[2rem] border border-slate-200/80 dark:border-slate-700">
-        <div className="space-y-4 border-b border-slate-100 p-5 dark:border-slate-700 sm:p-6">
+        <div className="space-y-2 border-b border-slate-100 p-5 dark:border-slate-700 sm:p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-100 dark:bg-blue-900/40">
                 <Users className="h-5 w-5 text-blue-600 dark:text-blue-400" />
               </div>
               <div>
-                <h3 className="font-bold text-slate-800 dark:text-white">Lead Generation Table</h3>
+                <h3 className="font-bold text-slate-800 dark:text-white">Users</h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {filteredUsers.length} match{filteredUsers.length !== 1 ? 'es' : ''} · {leadGenSegment.counts[leadSegmentTab]} in this segment · {visibleUsers.length} total users
+                  {filteredUsers.length} shown · {visibleUsers.length} total · sorted by latest login / activity (top = most recent)
+                </p>
+                <p className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
+                  Segments: Ghost {leadGenSegment.counts.ghost} · Irregular {leadGenSegment.counts.irregular} · Power {leadGenSegment.counts.power} · row badge = activity type
                 </p>
               </div>
-            </div>
-          </div>
-
-          {/* Activity segment tabs (real-time from transactions) */}
-          <div className="flex flex-col gap-2">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">User activity</p>
-            <div className="flex flex-wrap gap-2">
-              {([
-                {
-                  id: 'ghost' as const,
-                  label: 'Ghost Users',
-                  hint: 'Signed up · 0 transactions',
-                  icon: Ghost,
-                  count: leadGenSegment.counts.ghost,
-                },
-                {
-                  id: 'irregular' as const,
-                  label: 'Irregular Users',
-                  hint: 'Has history · fewer than 3 entries in last 7 days',
-                  icon: Activity,
-                  count: leadGenSegment.counts.irregular,
-                },
-                {
-                  id: 'power' as const,
-                  label: 'Power Users',
-                  hint: 'Pro targets · ≥3 entries in last 7 days',
-                  icon: Zap,
-                  count: leadGenSegment.counts.power,
-                },
-              ]).map(({ id, label, hint, icon: Icon, count }) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setLeadSegmentTab(id)}
-                  title={hint}
-                  className={cn(
-                    'flex min-w-0 flex-1 items-center gap-2.5 rounded-2xl border px-3 py-2.5 text-left transition-all sm:min-w-[10rem] sm:flex-none',
-                    leadSegmentTab === id
-                      ? 'border-indigo-500 bg-indigo-600 text-white shadow-lg shadow-indigo-500/25 dark:border-indigo-400'
-                      : 'border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-indigo-50/80 dark:border-slate-600 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:border-indigo-500/50 dark:hover:bg-slate-700/80'
-                  )}
-                >
-                  <span
-                    className={cn(
-                      'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl',
-                      leadSegmentTab === id ? 'bg-white/20' : 'bg-slate-100 dark:bg-slate-700'
-                    )}
-                  >
-                    <Icon className={cn('h-4 w-4', leadSegmentTab === id ? 'text-white' : 'text-indigo-600 dark:text-indigo-400')} />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-xs font-bold leading-tight">{label}</span>
-                    <span
-                      className={cn(
-                        'mt-0.5 block text-[10px] font-medium leading-snug',
-                        leadSegmentTab === id ? 'text-indigo-100' : 'text-slate-500 dark:text-slate-400'
-                      )}
-                    >
-                      {count} user{count !== 1 ? 's' : ''}
-                    </span>
-                  </span>
-                </button>
-              ))}
             </div>
           </div>
         </div>
@@ -2101,24 +2696,54 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           </div>
         )}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] text-left text-sm">
+          <table className="w-full min-w-[1180px] text-left text-sm">
             <thead>
               <tr className="bg-slate-50/80 dark:bg-slate-900/40">
-                {['User', 'Email / Phone', 'Profession', 'Monthly Income', 'Top Category', 'Net Balance', 'Behaviour Tags', 'Action'].map((h) => (
+                {['User', 'Last activity', 'Email / Phone', 'Profession', 'Monthly Income', 'LQI', 'Lead', 'Top Category', 'Net Balance', 'Behaviour Tags', 'Action'].map((h) => (
                   <th key={h} className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
-              {filteredUsers.map((u) => (
+              {filteredUsers.map((u) => {
+                const seg = leadGenSegment.byUid[u.id];
+                const segShort = seg === 'ghost' ? 'Ghost' : seg === 'power' ? 'Power' : 'Irregular';
+                const sortMs = getUserListSortTimeMs(u as any, transactions);
+                const lm = leadMetricsByUid[u.id];
+                return (
                 <tr key={u.id} onClick={() => handleUserClick(u)} className="group cursor-pointer transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-700/40">
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-3">
                       {u.photoURL ? <img src={u.photoURL} alt="" className="h-10 w-10 rounded-2xl object-cover" /> : (
                         <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 dark:bg-slate-700"><UserIcon className="h-5 w-5 text-slate-400" /></div>
                       )}
-                      <p className="font-bold text-slate-800 dark:text-white">{u.displayName || 'Anonymous'}</p>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <GoldLeadStar show={lm?.tier === 'gold'} />
+                          <p className="font-bold text-slate-800 dark:text-white">{u.displayName || 'Anonymous'}</p>
+                        </div>
+                        <span
+                          className={cn(
+                            'mt-0.5 inline-flex rounded-full px-2 py-0.5 text-[9px] font-black uppercase',
+                            seg === 'power'
+                              ? 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200'
+                              : seg === 'ghost'
+                                ? 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
+                                : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
+                          )}
+                        >
+                          {segShort}
+                        </span>
+                      </div>
                     </div>
+                  </td>
+                  <td className="px-5 py-4 whitespace-nowrap">
+                    <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                      {sortMs > 0 ? format(new Date(sortMs), 'MMM d, yyyy') : '—'}
+                    </p>
+                    <p className="text-[10px] text-slate-400">
+                      {sortMs > 0 ? format(new Date(sortMs), 'HH:mm') : 'no timestamp'}
+                    </p>
                   </td>
                   <td className="px-5 py-4">
                     <p className="text-xs text-slate-600 dark:text-slate-400">{u.email}</p>
@@ -2130,6 +2755,12 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                     </span>
                   </td>
                   <td className="px-5 py-4 font-bold text-green-600 dark:text-green-400">{formatCurrency(u.totalIncome, language)}</td>
+                  <td className="px-5 py-4">
+                    <span className="font-mono text-sm font-black text-violet-600 dark:text-violet-300">{lm ? lm.lqi : '—'}</span>
+                  </td>
+                  <td className="px-5 py-4 max-w-[9rem]">
+                    <LeadGenBadges lm={lm} />
+                  </td>
                   <td className="px-5 py-4">
                     <span className="rounded-xl bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600 dark:bg-slate-700 dark:text-slate-300">{u.topCategory}</span>
                   </td>
@@ -2145,17 +2776,6 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                   </td>
                   <td className="px-5 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <motion.button
-                        type="button"
-                        whileHover={{ scale: 1.07 }}
-                        whileTap={{ scale: 0.93 }}
-                        onClick={(e) => openNotifyModal(u, e)}
-                        className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-[11px] font-bold text-indigo-700 shadow-sm transition-all hover:border-indigo-300 hover:bg-indigo-100 dark:border-indigo-500/40 dark:bg-indigo-950/50 dark:text-indigo-200 dark:hover:bg-indigo-900/60"
-                        title="Send push & in-app notification"
-                      >
-                        <Bell className="h-3.5 w-3.5" />
-                        Notify
-                      </motion.button>
                       <motion.button
                         type="button"
                         whileHover={{ scale: 1.07 }}
@@ -2177,160 +2797,17 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                     </div>
                   </td>
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
           {filteredUsers.length === 0 && (
             <p className="py-12 text-center text-sm text-slate-400">
-              No users match the current filters or activity tab. Try another segment or clear filters.
+              No users match the current filters. Clear filters or adjust search.
             </p>
           )}
         </div>
       </motion.div>
-
-      {/* ── Notify user modal (glassmorphism) ── */}
-      <AnimatePresence>
-        {notifyUser && (
-          <motion.div
-            key={notifyUser.id}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-          >
-            <button
-              type="button"
-              className="absolute inset-0 bg-slate-900/50 backdrop-blur-md"
-              aria-label="Close"
-              onClick={() => setNotifyUser(null)}
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.94, y: 16 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.94, y: 16 }}
-              transition={{ type: 'spring', stiffness: 380, damping: 28 }}
-              className="relative z-10 w-full max-w-lg overflow-hidden rounded-[1.75rem] border border-white/30 bg-white/70 p-6 shadow-[0_24px_80px_-12px_rgba(0,0,0,0.35)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-900/70 dark:shadow-[0_24px_80px_-12px_rgba(0,0,0,0.6)]"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-indigo-500/10 via-transparent to-violet-500/10" />
-              <div className="relative">
-                <div className="mb-4 flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-500/15 ring-1 ring-indigo-500/25 dark:bg-indigo-400/10">
-                      <Bell className="h-5 w-5 text-indigo-600 dark:text-indigo-300" />
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-black text-slate-900 dark:text-white">Direct notify</h3>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                        {notifyUser.displayName || 'User'} · {notifyUser.email}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setNotifyUser(null)}
-                    className="rounded-full p-2 text-slate-400 transition-colors hover:bg-slate-200/80 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-white"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-
-                {notifyError && (
-                  <div className="mb-3 flex items-start gap-2 rounded-xl border border-rose-200/80 bg-rose-50/90 px-3 py-2 text-xs font-medium text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-200">
-                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                    {notifyError}
-                  </div>
-                )}
-
-                <div className="space-y-3">
-                  <div>
-                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                      Notification title
-                    </label>
-                    <input
-                      type="text"
-                      value={notifyTitle}
-                      onChange={(e) => setNotifyTitle(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none ring-indigo-500/30 placeholder:text-slate-400 focus:ring-2 dark:border-slate-600 dark:bg-slate-800/80 dark:text-white"
-                      placeholder="Short title"
-                    />
-                  </div>
-
-                  <div>
-                    <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-                      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                        Message
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => void handleAiPersonalTip()}
-                        disabled={notifyAiLoading}
-                        className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-violet-500/90 to-indigo-600 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-white shadow-md shadow-indigo-500/25 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {notifyAiLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-                        ✨ AI Bengali tip
-                      </button>
-                    </div>
-                    <textarea
-                      value={notifyMessage}
-                      onChange={(e) => setNotifyMessage(e.target.value)}
-                      rows={4}
-                      className="w-full resize-y rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2.5 text-sm text-slate-800 outline-none ring-indigo-500/30 placeholder:text-slate-400 focus:ring-2 dark:border-slate-600 dark:bg-slate-800/80 dark:text-white"
-                      placeholder="বার্তা বাংলায় লিখুন, অথবা AI বাটনে টিপুন…"
-                    />
-                    <p className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
-                      AI uses segment ({directNotifyAiContext?.userType ?? '—'}
-                      {directNotifyAiContext?.daysSinceLastEntry != null
-                        ? ` · ${directNotifyAiContext.daysSinceLastEntry}d since last entry`
-                        : directNotifyAiContext?.userType === 'Ghost User'
-                          ? ' · no entries yet'
-                          : ''}
-                      ), profession, top category ({String(notifyUser.topCategory ?? '—')}). AI fills title (Bangla) + message (≤140 chars); tone varies for loan/debt, shopping/food, rent/utilities.
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                      Push a blog (optional)
-                    </label>
-                    <select
-                      value={notifyBlogId}
-                      onChange={(e) => setNotifyBlogId(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/40 dark:border-slate-600 dark:bg-slate-800/80 dark:text-white"
-                    >
-                      <option value="">No blog — open app home when tapped</option>
-                      {notifyBlogList.map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {b.title}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="mt-6 flex flex-wrap items-center justify-end gap-2 border-t border-slate-200/60 pt-4 dark:border-slate-600/60">
-                  <button
-                    type="button"
-                    onClick={() => setNotifyUser(null)}
-                    className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-600 transition-colors hover:bg-slate-200/80 dark:text-slate-300 dark:hover:bg-slate-700"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleSendNotify()}
-                    disabled={notifySending}
-                    className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-indigo-500/30 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {notifySending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                    {notifySending ? 'Sending…' : 'Send'}
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* ── Global campaign modal ── */}
       <AnimatePresence>
@@ -2488,135 +2965,746 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         )}
       </AnimatePresence>
 
-      {/* ── User Detail Modal ── */}
+      {/* ── User Monitoring Board (full glass) ── */}
       <AnimatePresence>
-        {selectedUser && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setSelectedUser(null)} className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
-            <motion.div initial={{ opacity: 0, scale: 0.9, y: 24 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9, y: 24 }}
-              className="relative w-full max-w-2xl overflow-hidden rounded-[2.5rem] bg-white shadow-2xl dark:bg-slate-800">
-              <div className="flex items-center justify-between gap-4 bg-gradient-to-r from-indigo-600 to-violet-600 p-6 text-white">
-                <div className="flex items-center gap-4">
+        {selectedUser && userMonitoring && (
+          <div className="fixed inset-0 z-50 flex flex-col p-2 sm:p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedUser(null)}
+              className="absolute inset-0 bg-slate-950/55 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 28, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 28, scale: 0.98 }}
+              transition={{ type: 'spring', stiffness: 280, damping: 30 }}
+              onClick={(e) => e.stopPropagation()}
+              className="relative mx-auto flex h-[min(100dvh-1rem,900px)] w-full max-w-[min(96rem,100%)] flex-col overflow-hidden rounded-[1.75rem] border border-white/35 bg-white/50 shadow-2xl backdrop-blur-2xl dark:border-white/10 dark:bg-slate-900/45"
+            >
+              {/* Header */}
+              <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/30 bg-gradient-to-r from-indigo-600/90 via-violet-600/90 to-purple-700/90 px-4 py-3 text-white backdrop-blur-sm sm:px-6 sm:py-4">
+                <div className="flex min-w-0 items-center gap-3">
                   {selectedUser.photoURL ? (
-                    <img src={selectedUser.photoURL} alt="" className="h-14 w-14 rounded-2xl border-2 border-white/30 object-cover" />
+                    <img
+                      src={selectedUser.photoURL}
+                      alt=""
+                      className="h-12 w-12 shrink-0 rounded-2xl border-2 border-white/35 object-cover sm:h-14 sm:w-14"
+                    />
                   ) : (
-                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/20"><UserIcon className="h-7 w-7 text-white" /></div>
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/20 sm:h-14 sm:w-14">
+                      <UserIcon className="h-7 w-7 text-white" />
+                    </div>
                   )}
-                  <div>
-                    <h3 className="text-xl font-black">{selectedUser.displayName || 'Anonymous'}</h3>
-                    <p className="text-sm text-indigo-100">{selectedUser.email}</p>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-100/90">User Monitoring Board</p>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <GoldLeadStar show={leadMetricsByUid[selectedUser.id]?.tier === 'gold'} />
+                      <h3 className="truncate text-lg font-black sm:text-xl">{selectedUser.displayName || 'Anonymous'}</h3>
+                    </div>
                     <div className="mt-1 flex flex-wrap gap-1">
-                      {selectedUser.tags.map((tag: string) => (
-                        <span key={tag} className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-black text-white">{TAG_META[tag]?.emoji ?? ''} {tag}</span>
+                      {(selectedUser.tags ?? []).map((tag: string) => (
+                        <span
+                          key={tag}
+                          className="rounded-full bg-white/20 px-2 py-0.5 text-[9px] font-black text-white"
+                        >
+                          {TAG_META[tag]?.emoji ?? ''} {tag}
+                        </span>
                       ))}
                     </div>
+                    <div className="mt-2 max-w-[min(100%,28rem)] border-t border-white/20 pt-2">
+                      <p className="mb-1.5 text-[8px] font-black uppercase tracking-[0.22em] text-indigo-100/85">
+                        Marketing intelligence
+                      </p>
+                      <MarketingCyberBadges
+                        tags={
+                          Array.isArray((selectedUser as { marketingTags?: string[] }).marketingTags)
+                            ? (selectedUser as { marketingTags: string[] }).marketingTags
+                            : []
+                        }
+                        className="gap-1.5"
+                      />
+                    </div>
                   </div>
                 </div>
-                <button onClick={() => setSelectedUser(null)} className="rounded-full p-2 hover:bg-white/10"><X className="h-5 w-5" /></button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedUser(null)}
+                  className="shrink-0 rounded-full p-2 transition-colors hover:bg-white/15"
+                  aria-label="Close"
+                >
+                  <X className="h-5 w-5" />
+                </button>
               </div>
 
-              <div className="max-h-[70vh] overflow-y-auto p-6 space-y-6">
-                {/* ── Admin Remove Section ── */}
-                <div className="relative overflow-hidden rounded-2xl border border-rose-200/70 dark:border-rose-800/60"
-                  style={{ background: 'linear-gradient(135deg,#fff1f2 0%,#fff5f5 60%,#fef2f2 100%)' }}
-                >
-                  {/* Decorative glow blob */}
-                  <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-rose-400/15 blur-2xl" />
-
-                  <div className="relative flex flex-wrap items-center justify-between gap-4 p-4 dark:[background:linear-gradient(135deg,#2d1216_0%,#2a1010_100%)]">
-                    <div className="flex items-start gap-3 min-w-0">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-rose-100 dark:bg-rose-900/50 shadow-sm">
-                        <UserX className="h-4 w-4 text-rose-600 dark:text-rose-300" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-extrabold text-rose-800 dark:text-rose-200 leading-tight">
-                          Remove from Dashboard
-                        </p>
-                        <p className="mt-0.5 text-[11px] text-rose-500 dark:text-rose-400 leading-relaxed">
-                          Hides this user &amp; forces a fresh sign-in on their device.
-                        </p>
-                      </div>
-                    </div>
-
-                    <motion.button
-                      type="button"
-                      whileHover={{ scale: 1.04 }}
-                      whileTap={{ scale: 0.96 }}
-                      onClick={() => void forceUserRelogin(selectedUser.id)}
-                      disabled={adminActionPendingUid === selectedUser.id}
-                      className="inline-flex shrink-0 items-center gap-2 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-rose-500/30 transition-all hover:from-rose-500 hover:to-red-500 hover:shadow-rose-500/50 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {adminActionPendingUid === selectedUser.id ? (
-                        <><SpinIcon className="h-4 w-4 animate-spin" /> Removing…</>
-                      ) : (
-                        <><UserX className="h-4 w-4" /> Remove &amp; Sign Out</>
-                      )}
-                    </motion.button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { label: 'Income', value: selectedUser.totalIncome, color: 'text-green-600 dark:text-green-400' },
-                    { label: 'Expense', value: selectedUser.totalExpense, color: 'text-red-500 dark:text-red-400' },
-                    { label: 'Balance', value: selectedUser.balance, color: 'text-indigo-600 dark:text-indigo-400' },
-                  ].map((s) => (
-                    <div key={s.label} className="rounded-2xl bg-slate-50 p-4 text-center dark:bg-slate-900/50">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{s.label}</p>
-                      <p className={cn('mt-1 text-lg font-black', s.color)}>{formatCurrency(s.value, language)}</p>
-                    </div>
-                  ))}
-                </div>
-
-                {Object.keys(selectedUser.categoryBreakdown).length > 0 && (
-                  <div>
-                    <h4 className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-700 dark:text-slate-200">
-                      <Tags className="h-4 w-4 text-amber-500" /> Category Breakdown
-                    </h4>
-                    <div className="space-y-2">
-                      {Object.entries(selectedUser.categoryBreakdown as Record<string, number>)
-                        .sort((a, b) => b[1] - a[1]).slice(0, 8)
-                        .map(([cat, amt]) => {
-                          const pct = selectedUser.totalExpense > 0 ? (amt / selectedUser.totalExpense) * 100 : 0;
-                          return (
-                            <div key={cat} className="flex items-center gap-3">
-                              <span className="w-28 truncate text-xs font-semibold text-slate-600 dark:text-slate-400">{cat}</span>
-                              <div className="flex-1 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700" style={{ height: 6 }}>
-                                <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{ width: `${Math.min(pct, 100)}%` }} />
-                              </div>
-                              <span className="w-10 text-right text-xs font-bold text-slate-500">{pct.toFixed(0)}%</span>
+              <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6">
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-12 xl:gap-5">
+                  {/* ── Section A: Identity & Quick Actions ── */}
+                  <section className="xl:col-span-5 space-y-4">
+                    <div className="rounded-3xl border border-white/50 bg-white/55 p-4 shadow-lg backdrop-blur-xl dark:border-white/10 dark:bg-slate-800/40 sm:p-5">
+                      <h4 className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        <UserIcon className="h-4 w-4 text-indigo-500" />
+                        Identity
+                      </h4>
+                      <dl className="space-y-2.5 text-sm">
+                        <div className="flex justify-between gap-2 border-b border-slate-200/60 pb-2 dark:border-slate-600/50">
+                          <dt className="text-slate-500 dark:text-slate-400">Name</dt>
+                          <dd className="max-w-[60%] truncate text-right font-bold text-slate-800 dark:text-white">
+                            {selectedUser.displayName || '—'}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-2 border-b border-slate-200/60 pb-2 dark:border-slate-600/50">
+                          <dt className="text-slate-500 dark:text-slate-400">Email</dt>
+                          <dd className="max-w-[60%] truncate text-right font-semibold text-slate-800 dark:text-white">
+                            {selectedUser.email || '—'}
+                          </dd>
+                        </div>
+                        <div className="space-y-2 border-b border-slate-200/60 pb-3 dark:border-slate-600/50">
+                          <dt className="flex items-center gap-1 text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wide">
+                            <Phone className="h-3.5 w-3.5" /> মোবাইল (অ্যাডমিন সেট)
+                          </dt>
+                          <dd className="!m-0 space-y-2">
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                              <input
+                                type="tel"
+                                inputMode="tel"
+                                autoComplete="off"
+                                placeholder="যেমন: 01712xxxxxx"
+                                value={adminUserPhoneDraft}
+                                onChange={(e) => {
+                                  setAdminUserPhoneDraft(e.target.value);
+                                  setAdminUserPhoneSaved(false);
+                                  setAdminUserPhoneError(null);
+                                }}
+                                className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none ring-indigo-500/0 transition-all focus:ring-2 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+                              />
+                              <motion.button
+                                type="button"
+                                whileHover={{ scale: 1.02 }}
+                                whileTap={{ scale: 0.98 }}
+                                disabled={adminUserPhoneSaving}
+                                onClick={() => void saveAdminUserPhone()}
+                                className="shrink-0 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-2 text-xs font-black uppercase tracking-wide text-white shadow-md shadow-indigo-500/25 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {adminUserPhoneSaving ? 'সেভ…' : 'সংরক্ষণ'}
+                              </motion.button>
                             </div>
-                          );
-                        })}
+                            {adminUserPhoneError ? (
+                              <p className="text-xs font-semibold text-rose-600 dark:text-rose-400">{adminUserPhoneError}</p>
+                            ) : null}
+                            {adminUserPhoneSaved ? (
+                              <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400">ফায়ারস্টোরে সংরক্ষিত।</p>
+                            ) : null}
+                            <p className="text-[10px] leading-relaxed text-slate-400 dark:text-slate-500">
+                              ইউজারের অ্যাকাউন্টে <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">phoneNumber</code> হিসেবে যাবে — CSV, SMS ও WhatsApp লিংকে ব্যবহার হবে।
+                            </p>
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-slate-500 dark:text-slate-400">Profession</dt>
+                          <dd className="text-right font-semibold text-slate-800 dark:text-white">
+                            {getProfessionLabel(selectedUser.profession)}
+                          </dd>
+                        </div>
+                        <div className="space-y-2 border-t border-slate-200/60 pt-3 dark:border-slate-600/50">
+                          <dt className="text-[10px] font-black uppercase tracking-wider text-violet-600 dark:text-violet-300">
+                            Marketing tags (scanner)
+                          </dt>
+                          <dd className="!m-0">
+                            <MarketingCyberBadges
+                              tags={
+                                Array.isArray((selectedUser as { marketingTags?: string[] }).marketingTags)
+                                  ? (selectedUser as { marketingTags: string[] }).marketingTags
+                                  : []
+                              }
+                            />
+                          </dd>
+                        </div>
+                        {leadMetricsByUid[selectedUser.id] && (
+                          <>
+                            <div className="flex justify-between gap-2 border-t border-slate-200/60 pt-2.5 dark:border-slate-600/50">
+                              <dt className="text-slate-500 dark:text-slate-400">LQI score</dt>
+                              <dd className="flex items-center gap-2 text-right font-mono font-black text-violet-600 dark:text-violet-300">
+                                <GoldLeadStar show={leadMetricsByUid[selectedUser.id].tier === 'gold'} />
+                                {leadMetricsByUid[selectedUser.id].lqi}
+                              </dd>
+                            </div>
+                            <div className="flex justify-between gap-2 border-t border-slate-200/60 pt-2.5 dark:border-slate-600/50 items-start">
+                              <dt className="text-slate-500 dark:text-slate-400 shrink-0">Lead quality</dt>
+                              <dd className="max-w-[65%] flex justify-end">
+                                <LeadGenBadges lm={leadMetricsByUid[selectedUser.id]} />
+                              </dd>
+                            </div>
+                            {leadMetricsByUid[selectedUser.id].topCreditors ? (
+                              <div className="flex justify-between gap-2 border-t border-slate-200/60 pt-2.5 dark:border-slate-600/50 items-start">
+                                <dt className="text-slate-500 dark:text-slate-400 shrink-0">Top creditors (borrowed)</dt>
+                                <dd className="max-w-[65%] text-right text-xs font-semibold leading-snug text-slate-700 dark:text-slate-200">
+                                  {leadMetricsByUid[selectedUser.id].topCreditors}
+                                </dd>
+                              </div>
+                            ) : null}
+                          </>
+                        )}
+                      </dl>
+                      <div className="mt-4 grid grid-cols-2 gap-2">
+                        <div className="rounded-2xl bg-emerald-500/10 p-3 text-center ring-1 ring-emerald-500/20 dark:bg-emerald-500/5">
+                          <p className="text-[9px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+                            Total income
+                          </p>
+                          <p className="mt-1 text-base font-black text-emerald-600 dark:text-emerald-400 sm:text-lg">
+                            {formatCurrency(userMonitoring.allTimeIncome, language)}
+                          </p>
+                          <p className="mt-0.5 text-[9px] text-slate-500 dark:text-slate-400">All-time</p>
+                        </div>
+                        <div className="rounded-2xl bg-rose-500/10 p-3 text-center ring-1 ring-rose-500/20 dark:bg-rose-500/5">
+                          <p className="text-[9px] font-bold uppercase tracking-wider text-rose-700 dark:text-rose-300">
+                            Total expense
+                          </p>
+                          <p className="mt-1 text-base font-black text-rose-600 dark:text-rose-400 sm:text-lg">
+                            {formatCurrency(userMonitoring.allTimeExpense, language)}
+                          </p>
+                          <p className="mt-0.5 text-[9px] text-slate-500 dark:text-slate-400">All-time</p>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                )}
 
-                <div>
-                  <h4 className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-700 dark:text-slate-200">
-                    <Calendar className="h-4 w-4 text-blue-500" /> Recent Transactions
-                  </h4>
-                  <div className="space-y-2">
-                    {userTransactions.map((t) => (
-                      <div key={t.id} className="flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/30">
-                        <div className="flex items-center gap-3">
-                          <div className={cn('flex h-9 w-9 items-center justify-center rounded-xl', t.type === 'expense' ? 'bg-red-100 dark:bg-red-900/30' : 'bg-green-100 dark:bg-green-900/30')}>
-                            {t.type === 'expense' ? <TrendingDown className="h-4 w-4 text-red-600" /> : <TrendingUp className="h-4 w-4 text-green-600" />}
+                    <div className="rounded-3xl border border-white/50 bg-white/55 p-4 shadow-lg backdrop-blur-xl dark:border-white/10 dark:bg-slate-800/40 sm:p-5">
+                      <h4 className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        <Briefcase className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                        Financial network
+                        <span className="ml-auto rounded-full bg-slate-200/80 px-2 py-0.5 text-[9px] font-black text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                          {selectedUserFinancialNetwork.length} linked
+                        </span>
+                      </h4>
+                      {selectedUserFinancialNetwork.length === 0 ? (
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          No <code className="rounded bg-slate-100 px-1 dark:bg-slate-700">financial_network</code> rows yet. They appear when the user saves debt/loan entries with contact details.
+                        </p>
+                      ) : (
+                        <ul className="max-h-48 space-y-2 overflow-y-auto text-sm">
+                          {selectedUserFinancialNetwork.map((n: any) => (
+                            <li
+                              key={n.id ?? `${n.debtId}-${n.contactPhone}`}
+                              className="rounded-2xl border border-slate-200/70 bg-slate-50/80 px-3 py-2 dark:border-slate-600/50 dark:bg-slate-900/40"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <span className="font-bold text-slate-800 dark:text-slate-100">{n.contactName || '—'}</span>
+                                {n.isBusiness ? (
+                                  <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black uppercase text-amber-900 dark:bg-amber-900/40 dark:text-amber-100">
+                                    Business
+                                  </span>
+                                ) : (
+                                  <span className="shrink-0 rounded-full bg-slate-200 px-2 py-0.5 text-[9px] font-black uppercase text-slate-600 dark:bg-slate-300">
+                                    Person
+                                  </span>
+                                )}
+                              </div>
+                              <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                                {n.contactPhone || '—'} · {n.debtType === 'borrowed' ? 'Borrowed' : n.debtType === 'lent' ? 'Lent' : '—'} ·{' '}
+                                {formatCurrency(Number(n.amount) || 0, language)}
+                              </p>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+
+                    <div
+                      className="relative overflow-hidden rounded-3xl border border-rose-300/50 dark:border-rose-800/50"
+                      style={{ background: 'linear-gradient(135deg,#fff1f2 0%,#fff5f5 55%,#fef2f2 100%)' }}
+                    >
+                      <div className="pointer-events-none absolute -right-6 -top-6 h-28 w-28 rounded-full bg-rose-400/20 blur-2xl" />
+                      <div className="relative flex flex-col gap-3 p-4 dark:[background:linear-gradient(135deg,#2d1216_0%,#2a1010_100%)] sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-100 dark:bg-rose-900/50">
+                            <UserX className="h-5 w-5 text-rose-600 dark:text-rose-300" />
                           </div>
-                          <div>
-                            <p className="text-sm font-bold text-slate-800 dark:text-white">{t.category}</p>
-                            <p className="text-[10px] text-slate-400">{t.date?.toDate ? format(t.date.toDate(), 'MMM dd, yyyy') : 'N/A'}</p>
+                          <div className="min-w-0">
+                            <p className="text-sm font-extrabold text-rose-900 dark:text-rose-100">Quick action</p>
+                            <p className="text-[11px] leading-relaxed text-rose-600/90 dark:text-rose-300/90">
+                              Hides this user from the dashboard and forces a fresh sign-in on their device.
+                            </p>
                           </div>
                         </div>
-                        <p className={cn('font-black text-sm', t.type === 'expense' ? 'text-red-500' : 'text-green-600')}>
-                          {t.type === 'expense' ? '-' : '+'}{formatCurrency(t.amount, language)}
-                        </p>
+                        <motion.button
+                          type="button"
+                          whileHover={{ scale: 1.03 }}
+                          whileTap={{ scale: 0.97 }}
+                          onClick={() => void forceUserRelogin(selectedUser.id)}
+                          disabled={adminActionPendingUid === selectedUser.id}
+                          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-rose-500/35 transition-all hover:from-rose-500 hover:to-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {adminActionPendingUid === selectedUser.id ? (
+                            <>
+                              <SpinIcon className="h-4 w-4 animate-spin" /> Working…
+                            </>
+                          ) : (
+                            <>
+                              <UserX className="h-4 w-4" /> Force Remove
+                            </>
+                          )}
+                        </motion.button>
                       </div>
-                    ))}
-                    {userTransactions.length === 0 && <p className="py-4 text-center text-sm text-slate-400">No transactions for this month.</p>}
-                  </div>
+                    </div>
+                  </section>
+
+                  {/* ── Section B: Activity Analytics ── */}
+                  <section className="xl:col-span-7 space-y-4">
+                    <div className="rounded-3xl border border-white/50 bg-white/55 p-4 shadow-lg backdrop-blur-xl dark:border-white/10 dark:bg-slate-800/40 sm:p-5">
+                      <h4 className="mb-4 flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        <LineChart className="h-4 w-4 text-violet-500" />
+                        Activity analytics
+                      </h4>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <div className="rounded-2xl bg-slate-100/80 p-3 dark:bg-slate-900/50">
+                          <p className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400">Days active</p>
+                          <p className="mt-1 text-2xl font-black text-indigo-600 dark:text-indigo-300">
+                            {userMonitoring.distinctActiveDays}
+                          </p>
+                          <p className="text-[10px] text-slate-500">Distinct days with ≥1 entry (all-time)</p>
+                        </div>
+                        <div className="rounded-2xl bg-slate-100/80 p-3 dark:bg-slate-900/50">
+                          <p className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400">Days inactive (window)</p>
+                          <p className="mt-1 text-2xl font-black text-amber-600 dark:text-amber-300">
+                            {userMonitoring.inactiveDaysInWindow}
+                          </p>
+                          <p className="text-[10px] text-slate-500">
+                            Calendar days from first entry → today minus active days
+                          </p>
+                        </div>
+                        <div className="rounded-2xl bg-slate-100/80 p-3 dark:bg-slate-900/50">
+                          <p className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400">Transaction frequency</p>
+                          <p className="mt-1 text-2xl font-black text-violet-600 dark:text-violet-300">
+                            {userMonitoring.entriesPerWeek < 0.1
+                              ? '—'
+                              : `${userMonitoring.entriesPerWeek.toFixed(1)}/wk`}
+                          </p>
+                          <p className="text-[10px] text-slate-500">
+                            Avg entries per week since first activity ({userMonitoring.txs.length} total)
+                          </p>
+                        </div>
+                      </div>
+                      {userMonitoring.daysSinceLastActivity != null && (
+                        <p className="mt-3 text-center text-xs font-semibold text-slate-600 dark:text-slate-300">
+                          <Clock className="mr-1 inline h-3.5 w-3.5 text-slate-400" />
+                          {userMonitoring.daysSinceLastActivity === 0
+                            ? 'Last activity: today'
+                            : `${userMonitoring.daysSinceLastActivity} day(s) since last entry`}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="rounded-3xl border border-white/50 bg-white/55 p-4 shadow-lg backdrop-blur-xl dark:border-white/10 dark:bg-slate-800/40 sm:p-5">
+                      <h4 className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        <Activity className="h-4 w-4 text-sky-500" />
+                        Last 10 activities
+                      </h4>
+                      <div className="relative pl-3">
+                        <div className="absolute bottom-1 left-[7px] top-1 w-px bg-gradient-to-b from-indigo-400/80 via-violet-400/50 to-transparent" />
+                        <ul className="space-y-2.5">
+                          {userMonitoring.last10Activities.map((t: any) => {
+                            const ms = txTimestampMs(t);
+                            const d = ms != null ? new Date(ms) : null;
+                            return (
+                              <li key={t.id} className="relative flex gap-3 pl-4">
+                                <span
+                                  className={cn(
+                                    'absolute left-0 top-1.5 h-2 w-2 rounded-full ring-2 ring-white dark:ring-slate-800',
+                                    t.type === 'expense' ? 'bg-rose-500' : 'bg-emerald-500',
+                                  )}
+                                />
+                                <div className="min-w-0 flex-1 rounded-xl border border-slate-200/70 bg-white/60 px-3 py-2 dark:border-slate-600/50 dark:bg-slate-900/30">
+                                  <div className="flex flex-wrap items-center justify-between gap-1">
+                                    <span className="truncate text-xs font-bold text-slate-800 dark:text-white">
+                                      {t.category || '—'} ·{' '}
+                                      <span className="font-semibold text-slate-500">{t.type}</span>
+                                    </span>
+                                    <span
+                                      className={cn(
+                                        'text-xs font-black',
+                                        t.type === 'expense' ? 'text-rose-500' : 'text-emerald-600',
+                                      )}
+                                    >
+                                      {t.type === 'expense' ? '-' : '+'}
+                                      {formatCurrency(Number(t.amount) || 0, language)}
+                                    </span>
+                                  </div>
+                                  <p className="text-[10px] text-slate-400">
+                                    {d ? format(d, 'MMM d, yyyy · HH:mm') : '—'}
+                                  </p>
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                        {userMonitoring.last10Activities.length === 0 && (
+                          <p className="py-6 text-center text-sm text-slate-400">No transactions yet.</p>
+                        )}
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* ── Section C: Logs ── */}
+                  <section className="xl:col-span-7 space-y-4">
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                      <div className="flex min-h-[220px] flex-col rounded-3xl border border-white/50 bg-white/55 shadow-lg backdrop-blur-xl dark:border-white/10 dark:bg-slate-800/40">
+                        <div className="border-b border-slate-200/60 px-4 py-3 dark:border-slate-600/50">
+                          <h4 className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                            <FileText className="h-4 w-4 text-indigo-500" />
+                            Transaction log (all-time)
+                          </h4>
+                        </div>
+                        <div className="max-h-[min(40vh,320px)] flex-1 overflow-y-auto p-3">
+                          {userMonitoring.txs.map((t: any) => (
+                            <div
+                              key={t.id}
+                              className="mb-2 rounded-2xl border border-slate-200/60 bg-white/70 px-3 py-2.5 last:mb-0 dark:border-slate-600/40 dark:bg-slate-900/35"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="truncate text-xs font-bold text-slate-800 dark:text-white">
+                                    {t.category || '—'}
+                                  </p>
+                                  <p className="text-[10px] text-slate-400">
+                                    {t.date?.toDate
+                                      ? format(t.date.toDate(), 'MMM d, yyyy')
+                                      : '—'}{' '}
+                                    · <span className="capitalize">{t.type}</span>
+                                  </p>
+                                </div>
+                                <p
+                                  className={cn(
+                                    'shrink-0 text-sm font-black',
+                                    t.type === 'expense' ? 'text-rose-500' : 'text-emerald-600',
+                                  )}
+                                >
+                                  {t.type === 'expense' ? '-' : '+'}
+                                  {formatCurrency(Number(t.amount) || 0, language)}
+                                </p>
+                              </div>
+                              <p className="mt-1.5 text-[11px] leading-snug text-slate-600 dark:text-slate-300">
+                                <span className="font-semibold text-slate-500 dark:text-slate-400">Note: </span>
+                                {typeof t.note === 'string' && t.note.trim() ? t.note : '—'}
+                              </p>
+                            </div>
+                          ))}
+                          {userMonitoring.txs.length === 0 && (
+                            <p className="py-8 text-center text-sm text-slate-400">No transactions.</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex min-h-[220px] flex-col rounded-3xl border border-white/50 bg-white/55 shadow-lg backdrop-blur-xl dark:border-white/10 dark:bg-slate-800/40">
+                        <div className="border-b border-slate-200/60 px-4 py-3 dark:border-slate-600/50">
+                          <h4 className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                            <Bell className="h-4 w-4 text-amber-500" />
+                            Notification history
+                          </h4>
+                        </div>
+                        <div className="max-h-[min(40vh,320px)] flex-1 overflow-y-auto p-3">
+                          {userInAppNotifsLoading && (
+                            <div className="flex justify-center py-8">
+                              <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
+                            </div>
+                          )}
+                          {userInAppNotifsError && (
+                            <p className="rounded-xl bg-red-50 p-3 text-xs text-red-700 dark:bg-red-900/20 dark:text-red-300">
+                              {userInAppNotifsError}
+                            </p>
+                          )}
+                          {!userInAppNotifsLoading &&
+                            !userInAppNotifsError &&
+                            userInAppNotifs.map((n) => (
+                              <div
+                                key={n.id}
+                                className="mb-2 rounded-2xl border border-slate-200/60 bg-white/70 px-3 py-2.5 last:mb-0 dark:border-slate-600/40 dark:bg-slate-900/35"
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <p className="text-xs font-bold text-slate-800 dark:text-white">{n.title || '—'}</p>
+                                  <span
+                                    className={cn(
+                                      'shrink-0 rounded-full px-2 py-0.5 text-[9px] font-black uppercase',
+                                      n.read
+                                        ? 'bg-slate-200/80 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
+                                        : 'bg-indigo-500 text-white shadow-sm shadow-indigo-500/30',
+                                    )}
+                                  >
+                                    {n.read ? 'Read' : 'Unread'}
+                                  </span>
+                                </div>
+                                <p className="mt-1 line-clamp-3 text-[11px] text-slate-600 dark:text-slate-300">
+                                  {n.body || '—'}
+                                </p>
+                                <p className="mt-1 text-[10px] text-slate-400">
+                                  {n.createdAt &&
+                                  typeof n.createdAt === 'object' &&
+                                  n.createdAt !== null &&
+                                  'toDate' in n.createdAt &&
+                                  typeof (n.createdAt as { toDate: () => Date }).toDate === 'function'
+                                    ? format((n.createdAt as { toDate: () => Date }).toDate(), 'MMM d, yyyy HH:mm')
+                                    : '—'}
+                                </p>
+                              </div>
+                            ))}
+                          {!userInAppNotifsLoading && !userInAppNotifsError && userInAppNotifs.length === 0 && (
+                            <p className="py-8 text-center text-sm text-slate-400">No in-app notifications.</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* ── Outreach: push, SMS, email, WhatsApp + AI (same 360° board) ── */}
+                  <section className="xl:col-span-12">
+                    <div className="rounded-3xl border border-indigo-200/50 bg-gradient-to-br from-white/70 to-indigo-50/40 p-4 shadow-lg backdrop-blur-xl dark:border-indigo-500/20 dark:from-slate-800/50 dark:to-indigo-950/30 sm:p-5">
+                      <h4 className="mb-2 flex flex-wrap items-center gap-2 text-xs font-black uppercase tracking-wider text-indigo-800 dark:text-indigo-200">
+                        <Bell className="h-4 w-4" />
+                        আউটরিচ: অ্যাপ পুশ · SMS · ইমেইল · হোয়াটসঅ্যাপ
+                      </h4>
+                      <p className="mb-2 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+                        <span className="font-semibold text-indigo-700 dark:text-indigo-300">অ্যাপ পুশ</span> FCM কিউতে যায়।{' '}
+                        <span className="font-semibold text-emerald-700 dark:text-emerald-300">SMS / ইমেইল / WhatsApp</span> এখন{' '}
+                        ড্রাফট লিংক (ডিভাইসে খুলবে) — পরে চাইলে Twilio, SendGrid, WhatsApp Cloud API ইত্যাদি ব্যাকএন্ড থেকে পাঠাতে পারবেন।{' '}
+                        AI অল-টাইম ডাটা দেখে শিরোনাম+বার্তা বানায়।
+                      </p>
+                      <p className="mb-3 rounded-lg border border-slate-200/80 bg-slate-50/90 px-2.5 py-1.5 font-mono text-[9px] leading-snug text-slate-500 dark:border-slate-600 dark:bg-slate-900/50 dark:text-slate-400">
+                        Integration stubs: see <code className="text-indigo-600 dark:text-indigo-400">src/lib/adminOutreachLinks.ts</code>{' '}
+                        (mailto / sms / wa.me) + server-side send when you add providers.
+                      </p>
+                      <p className="mb-4 rounded-xl border border-amber-200/70 bg-amber-50/95 px-3 py-2 text-[10px] leading-snug text-amber-950 dark:border-amber-800/50 dark:bg-amber-950/35 dark:text-amber-100">
+                        <span className="font-black">পুশ বার্তায় স্বয়ংক্রিয় বিঃদ্রঃ:</span>{' '}
+                        {REENGAGEMENT_NOTIFICATION_DISCLAIMER_BN.trim()}
+                      </p>
+
+                      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                        <div className="space-y-3">
+                          {panelPushError && (
+                            <div className="flex items-start gap-2 rounded-xl border border-rose-200/80 bg-rose-50/90 px-3 py-2 text-xs text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200">
+                              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                              {panelPushError}
+                            </div>
+                          )}
+                          <div>
+                            <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                              শিরোনাম
+                            </label>
+                            <input
+                              type="text"
+                              value={panelPushTitle}
+                              onChange={(e) => setPanelPushTitle(e.target.value)}
+                              className="w-full rounded-xl border border-slate-200/80 bg-white/90 px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/40 dark:border-slate-600 dark:bg-slate-900/80 dark:text-white"
+                            />
+                          </div>
+                          <div>
+                            <div className="mb-1 flex flex-wrap items-center gap-2">
+                              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                                বার্তা (পুশ, SMS, ইমেইল, WA)
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => void handlePanelReengageAi()}
+                                disabled={panelPushAiLoading || !selectedUserNotifyContext}
+                                className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-white shadow-md shadow-indigo-500/25 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {panelPushAiLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                                AI — ইউজারের জন্য নোটিফিকেশন
+                              </button>
+                            </div>
+                            <textarea
+                              value={panelPushMessage}
+                              onChange={(e) => setPanelPushMessage(e.target.value)}
+                              rows={4}
+                              className="w-full resize-y rounded-xl border border-slate-200/80 bg-white/90 px-3 py-2.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/40 dark:border-slate-600 dark:bg-slate-900/80 dark:text-white"
+                              placeholder="ম্যানুয়ালি লিখুন বা AI বাটন…"
+                            />
+                            <p className="mt-1 text-[10px] text-slate-400">
+                              সেগমেন্ট: {selectedUserNotifyContext?.userType ?? '—'}
+                              {selectedUserNotifyContext?.daysSinceLastEntry != null
+                                ? ` · শেষ এন্ট্রি ${selectedUserNotifyContext.daysSinceLastEntry} দিন আগে`
+                                : ''}
+                            </p>
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                              ব্লগ লিংক (ঐচ্ছিক)
+                            </label>
+                            <select
+                              value={panelPushBlogId}
+                              onChange={(e) => setPanelPushBlogId(e.target.value)}
+                              className="w-full rounded-xl border border-slate-200/80 bg-white/90 px-3 py-2.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/40 dark:border-slate-600 dark:bg-slate-900/80 dark:text-white"
+                            >
+                              <option value="">নো ব্লগ — হোম খুলবে</option>
+                              {panelBlogList.map((b) => (
+                                <option key={b.id} value={b.id}>
+                                  {b.title}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="space-y-2">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                              চ্যানেলে পাঠান / খুলুন
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void handlePanelSendPush()}
+                                disabled={panelPushSending}
+                                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-indigo-500/30 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm"
+                              >
+                                {panelPushSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bell className="h-4 w-4" />}
+                                অ্যাপ পুশ (কিউ)
+                              </button>
+                              {(() => {
+                                const msg = `${panelPushTitle.trim() ? `${panelPushTitle.trim()}\n\n` : ''}${panelPushMessage.trim() || 'Ay Bay Er GustiMari'}`;
+                                const smsHref = buildSmsDraftHref(selectedUser.phoneNumber, msg);
+                                return smsHref ? (
+                                  <a
+                                    href={smsHref}
+                                    className="inline-flex items-center gap-2 rounded-xl border border-emerald-300/80 bg-emerald-50 px-4 py-2.5 text-xs font-bold text-emerald-900 transition-colors hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-100 dark:hover:bg-emerald-900/50 sm:text-sm"
+                                  >
+                                    <MessageSquare className="h-4 w-4 shrink-0" />
+                                    SMS
+                                  </a>
+                                ) : (
+                                  <span className="inline-flex items-center rounded-xl border border-dashed border-slate-300 px-3 py-2 text-[10px] text-slate-400 dark:border-slate-600">
+                                    SMS — ফোন নেই
+                                  </span>
+                                );
+                              })()}
+                              {(() => {
+                                const msg = `${panelPushTitle.trim() ? `${panelPushTitle.trim()}\n\n` : ''}${panelPushMessage.trim() || 'Ay Bay Er GustiMari'}`;
+                                const mailHref = buildMailtoHref(selectedUser.email, panelPushTitle.trim() || 'Ay Bay Er GustiMari', msg);
+                                return mailHref ? (
+                                  <a
+                                    href={mailHref}
+                                    className="inline-flex items-center gap-2 rounded-xl border border-sky-300/80 bg-sky-50 px-4 py-2.5 text-xs font-bold text-sky-900 transition-colors hover:bg-sky-100 dark:border-sky-700 dark:bg-sky-950/40 dark:text-sky-100 dark:hover:bg-sky-900/50 sm:text-sm"
+                                  >
+                                    <Mail className="h-4 w-4 shrink-0" />
+                                    ইমেইল
+                                  </a>
+                                ) : (
+                                  <span className="inline-flex items-center rounded-xl border border-dashed border-slate-300 px-3 py-2 text-[10px] text-slate-400 dark:border-slate-600">
+                                    ইমেইল — ঠিকানা নেই
+                                  </span>
+                                );
+                              })()}
+                              {(() => {
+                                const msg = `${panelPushTitle.trim() ? `${panelPushTitle.trim()}\n\n` : ''}${panelPushMessage.trim() || 'Ay Bay Er GustiMari'}`;
+                                const waHref = buildWhatsAppWebHref(selectedUser.phoneNumber, msg);
+                                return waHref ? (
+                                  <a
+                                    href={waHref}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-2 rounded-xl border border-green-500/50 bg-green-50 px-4 py-2.5 text-xs font-bold text-green-900 transition-colors hover:bg-green-100 dark:border-green-700 dark:bg-green-950/50 dark:text-green-100 dark:hover:bg-green-900/40 sm:text-sm"
+                                  >
+                                    <MessageCircle className="h-4 w-4 shrink-0" />
+                                    WhatsApp
+                                  </a>
+                                ) : (
+                                  <span className="inline-flex items-center rounded-xl border border-dashed border-slate-300 px-3 py-2 text-[10px] text-slate-400 dark:border-slate-600">
+                                    WA — ফোন নেই
+                                  </span>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-3 rounded-2xl border border-slate-200/60 bg-white/50 p-4 dark:border-slate-600/50 dark:bg-slate-900/30">
+                          <p className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                            শুধু এডমিনের জন্য (পাঠানো হয় না)
+                          </p>
+                          <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+                            প্রো প্ল্যান, অফার, বা রিটেনশন স্ট্র্যাটেজি — ইউজার দেখবে না। ডাটা বিশ্লেষণ করে ইংরেজি/বাংলায় পরামর্শ।
+                          </p>
+                          {panelAdminOnlyError && (
+                            <p className="rounded-lg bg-rose-50 px-2 py-1.5 text-[11px] text-rose-700 dark:bg-rose-950/40 dark:text-rose-200">
+                              {panelAdminOnlyError}
+                            </p>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => void handlePanelAdminOnlyInsight()}
+                            disabled={panelAdminOnlyLoading || !userMonitoring}
+                            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border-2 border-amber-400/80 bg-amber-50/90 py-2.5 text-xs font-black uppercase tracking-wide text-amber-950 shadow-sm transition-all hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-600 dark:bg-amber-950/40 dark:text-amber-100"
+                          >
+                            {panelAdminOnlyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Target className="h-4 w-4" />}
+                            AI — এডমিন পরামর্শ (প্রো/অফার)
+                          </button>
+                          {panelAdminOnlyInsight && (
+                            <div className="max-h-48 overflow-y-auto rounded-xl border border-slate-200/80 bg-slate-50/90 p-3 text-xs leading-relaxed text-slate-800 dark:border-slate-600 dark:bg-slate-950/50 dark:text-slate-100">
+                              <p className="whitespace-pre-wrap">{panelAdminOnlyInsight}</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* ── Section D: AI Strategic Playbook ── */}
+                  <section className="xl:col-span-5 xl:row-span-1">
+                    <div
+                      className={cn(
+                        'relative overflow-hidden rounded-3xl border-2 p-4 shadow-[0_0_32px_rgba(99,102,241,0.35),0_0_64px_rgba(168,85,247,0.2)]',
+                        'border-indigo-400/90 bg-gradient-to-br from-slate-950/80 via-indigo-950/40 to-purple-950/80',
+                        'dark:border-violet-400/80 dark:from-slate-950/90 dark:via-indigo-950/50 dark:to-purple-950/90',
+                      )}
+                    >
+                      <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-violet-500/25 blur-3xl" />
+                      <div className="pointer-events-none absolute -bottom-8 left-0 h-32 w-32 rounded-full bg-indigo-500/20 blur-3xl" />
+
+                      <div className="relative">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="h-5 w-5 text-violet-300 drop-shadow-[0_0_8px_rgba(167,139,250,0.9)]" />
+                          <h4 className="bg-gradient-to-r from-indigo-200 via-violet-200 to-fuchsia-200 bg-clip-text text-base font-black tracking-tight text-transparent sm:text-lg">
+                            AI Strategic Insight for Admin
+                          </h4>
+                        </div>
+                        <p className="mt-1 text-[11px] leading-relaxed text-indigo-100/80">
+                          Mastermind layer: analysis is for you only, not shown to the user. Uses Gemini (1.5 Flash first)
+                          with all-time totals, top expense categories, frequency, and recent notes.
+                        </p>
+
+                        <button
+                          type="button"
+                          onClick={() => void handleAnalyzeUserVibe()}
+                          disabled={adminStrategicLoading}
+                          className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-500 via-violet-600 to-purple-600 py-3 text-sm font-black uppercase tracking-wide text-white shadow-lg shadow-violet-500/40 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {adminStrategicLoading ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" /> Analyzing…
+                            </>
+                          ) : (
+                            <>
+                              <Zap className="h-4 w-4" /> Analyze User Vibe
+                            </>
+                          )}
+                        </button>
+
+                        {adminStrategicError && (
+                          <p className="mt-3 rounded-xl border border-red-400/40 bg-red-950/40 p-3 text-xs text-red-200">
+                            {adminStrategicError}
+                          </p>
+                        )}
+
+                        {adminStrategicInsight && (
+                          <div className="mt-4 max-h-[min(36vh,280px)] overflow-y-auto rounded-2xl border border-white/10 bg-black/25 p-3 text-sm leading-relaxed text-indigo-50/95 backdrop-blur-sm">
+                            <p className="whitespace-pre-wrap">{adminStrategicInsight}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </section>
                 </div>
+
+                {adminActionError && (
+                  <p className="mt-4 text-center text-xs font-semibold text-red-600 dark:text-red-400">{adminActionError}</p>
+                )}
               </div>
             </motion.div>
           </div>
@@ -2705,19 +3793,43 @@ const AdminDashboard: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center justify-between">
-                    <span>Message *</span>
-                    <span className="font-normal text-slate-400 normal-case">(max 120 chars)</span>
-                  </label>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                      Message *
+                    </label>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[10px] font-normal text-slate-400 normal-case">(max 120 chars)</span>
+                      <button
+                        type="button"
+                        onClick={() => void handleInactiveAiPersonalTip()}
+                        disabled={inactiveAiLoading || inactiveSending || !inactiveCampaignAiContext}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-violet-500/90 to-indigo-600 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-white shadow-md shadow-indigo-500/25 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {inactiveAiLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                        ✨ AI Bengali tip
+                      </button>
+                    </div>
+                  </div>
                   <textarea
                     value={inactiveComposeMsg}
                     onChange={(e) => setInactiveComposeMsg(e.target.value)}
                     rows={3}
                     maxLength={120}
-                    placeholder="আপনার খরচ ট্র্যাক করুন — Ay Bay Er GustiMari আপনার জন্য অপেক্ষা করছে!"
+                    placeholder="বার্তা বাংলায় লিখুন, অথবা AI বাটনে টিপুন…"
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all resize-none"
                   />
                   <p className="text-[10px] text-slate-400 text-right">{inactiveComposeMsg.length}/120</p>
+                  {inactiveCampaignAiContext && (
+                    <p className="text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">
+                      AI uses the same model as Lead Generation “Direct notify”: segment (
+                      {inactiveCampaignAiContext.userType}
+                      {inactiveCampaignAiContext.daysSinceLastEntry != null
+                        ? ` · ${inactiveCampaignAiContext.daysSinceLastEntry}d since last entry`
+                        : ' · no entries yet'}
+                      ), profession, top spend category (
+                      {String(inactiveCampaignAiContext.topCategory ?? '—')}). One sample user = highest inactive days among selected.
+                    </p>
+                  )}
                 </div>
               </div>
 

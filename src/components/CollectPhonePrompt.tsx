@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, updateDoc } from 'firebase/firestore';
 import { motion } from 'motion/react';
 import { Phone, ArrowRight, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -31,11 +31,11 @@ const CollectPhonePrompt: React.FC = () => {
     setSubmitting(true);
     setError(null);
     try {
-      await setDoc(
-        doc(db, 'users', user.uid),
-        { phoneNumber: trimmed },
-        { merge: true },
-      );
+      try {
+        await updateDoc(doc(db, 'users', user.uid), { phoneNumber: trimmed });
+      } catch {
+        await setDoc(doc(db, 'users', user.uid), { phoneNumber: trimmed }, { merge: true });
+      }
       console.log(`Success: Phone number ${trimmed} saved for user ${user.uid}`);
     } catch (err) {
       console.error('[CollectPhonePrompt]', err);

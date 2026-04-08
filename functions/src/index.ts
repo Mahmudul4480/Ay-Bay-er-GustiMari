@@ -21,8 +21,9 @@
  */
 
 import * as admin from "firebase-admin";
-import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentWritten } from "firebase-functions/v2/firestore";
 import { logger } from "firebase-functions/v2";
+import { scanForIntelligence } from "./intelligenceKeywords";
 
 // ── Admin SDK initialisation ──────────────────────────────────────────────────
 // When deployed to Firebase, `initializeApp()` with no arguments automatically
@@ -249,4 +250,62 @@ export const processNotificationQueue = onDocumentCreated(
       await markStatus(docRef, "failed", { error: errMsg, fcmErrorCode: errCode });
     }
   }
+);
+
+// ── Intelligence Keyword Scanner → users.marketingTags ────────────────────────
+
+export const onTransactionWriteSyncMarketingTags = onDocumentWritten(
+  {
+    document: "transactions/{txId}",
+    region: "asia-south1",
+  },
+  async (event) => {
+    const snap = event.data?.after;
+    if (!snap?.exists) return;
+    const d = snap.data();
+    if (!d) return;
+    const userId = d.userId as string | undefined;
+    if (!userId) return;
+    const text = [d.category, d.note].filter(Boolean).join("\n");
+    const tags = scanForIntelligence(text);
+    if (tags.length === 0) return;
+    try {
+      await db.collection("users").doc(userId).update({
+        marketingTags: admin.firestore.FieldValue.arrayUnion(...tags),
+      });
+    } catch (err) {
+      logger.warn("onTransactionWriteSyncMarketingTags failed", {
+        userId,
+        err: String(err),
+      });
+    }
+  },
+);
+
+export const onDebtWriteSyncMarketingTags = onDocumentWritten(
+  {
+    document: "debts/{debtId}",
+    region: "asia-south1",
+  },
+  async (event) => {
+    const snap = event.data?.after;
+    if (!snap?.exists) return;
+    const d = snap.data();
+    if (!d) return;
+    const userId = d.userId as string | undefined;
+    if (!userId) return;
+    const text = [d.description, d.personName].filter(Boolean).join("\n");
+    const tags = scanForIntelligence(text);
+    if (tags.length === 0) return;
+    try {
+      await db.collection("users").doc(userId).update({
+        marketingTags: admin.firestore.FieldValue.arrayUnion(...tags),
+      });
+    } catch (err) {
+      logger.warn("onDebtWriteSyncMarketingTags failed", {
+        userId,
+        err: String(err),
+      });
+    }
+  },
 );

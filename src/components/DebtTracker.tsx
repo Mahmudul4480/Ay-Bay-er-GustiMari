@@ -11,6 +11,11 @@ import { Plus, Trash2, CheckCircle, Clock, User, DollarSign, Calendar, X, Phone,
 
 import { convertBengaliToAscii, sanitizeDecimal } from '../lib/numberUtils';
 import { useTransactionFeedback } from '../contexts/TransactionFeedbackContext';
+import {
+  upsertFinancialNetworkEntry,
+  deleteFinancialNetworkByDebtId,
+} from '../lib/financialNetworkSync';
+import { mergeMarketingTagsFromTexts } from '../lib/marketingTagsSync';
 
 const DebtTracker: React.FC = () => {
   const { debts = [] } = useTransactions();
@@ -32,6 +37,7 @@ const DebtTracker: React.FC = () => {
     description: '',
     dueDate: new Date().toISOString().split('T')[0],
     phoneNumber: '',
+    isBusiness: false,
   });
   const [isEditSubmitting, setIsEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
@@ -43,13 +49,20 @@ const DebtTracker: React.FC = () => {
     description: '',
     dueDate: new Date().toISOString().split('T')[0],
     phoneNumber: '',
+    isBusiness: false,
   });
+
+  const phoneDigitsCount = (raw: string) => String(raw).replace(/\D/g, '').length;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!user || !formData.personName || !formData.amount) {
+    if (!user || !formData.personName.trim() || !formData.amount) {
       setError(t('fillAllFields') || 'Please fill all fields');
+      return;
+    }
+    if (phoneDigitsCount(formData.phoneNumber) < 10) {
+      setError(t('phoneNumber') ? `${t('phoneNumber')}: at least 10 digits` : 'Contact phone must have at least 10 digits');
       return;
     }
 
@@ -66,18 +79,33 @@ const DebtTracker: React.FC = () => {
       try {
         debtRef = await addDoc(collection(db, 'debts'), {
           userId: user.uid,
-          personName: formData.personName,
+          personName: formData.personName.trim(),
           amount: amountNum,
           type: formData.type,
           description: formData.description,
           dueDate: new Date(formData.dueDate),
           status: 'unpaid',
-          phoneNumber: formData.phoneNumber,
+          phoneNumber: formData.phoneNumber.trim(),
+          isBusiness: formData.isBusiness,
           createdAt: serverTimestamp(),
         });
       } catch (err) {
         handleFirestoreError(err, OperationType.CREATE, 'debts');
         return;
+      }
+
+      try {
+        await upsertFinancialNetworkEntry({
+          userId: user.uid,
+          debtId: debtRef.id,
+          contactName: formData.personName.trim(),
+          contactPhone: formData.phoneNumber.trim(),
+          isBusiness: formData.isBusiness,
+          debtType: formData.type,
+          amount: amountNum,
+        });
+      } catch (e) {
+        console.error('financial_network sync:', e);
       }
 
       // 2. Rule A: Instantly adjust balance by creating a transaction
@@ -98,6 +126,13 @@ const DebtTracker: React.FC = () => {
         handleFirestoreError(err, OperationType.CREATE, 'transactions');
       }
 
+      const debtNote = `${formData.type === 'lent' ? 'Lent to' : 'Borrowed from'} ${formData.personName}`;
+      mergeMarketingTagsFromTexts(user.uid, [
+        formData.description,
+        formData.personName,
+        debtNote,
+      ]).catch(() => {});
+
       setIsModalOpen(false);
       setFormData({ 
         personName: '', 
@@ -106,6 +141,7 @@ const DebtTracker: React.FC = () => {
         description: '', 
         dueDate: new Date().toISOString().split('T')[0],
         phoneNumber: '',
+        isBusiness: false,
       });
     } catch (err: any) {
       console.error('Error adding debt:', err);
@@ -166,6 +202,7 @@ const DebtTracker: React.FC = () => {
           debtId: debt.id,
           createdAt: serverTimestamp(),
         });
+        mergeMarketingTagsFromTexts(user!.uid, [category, note, debt.description, debt.personName]).catch(() => {});
         if (newStatus === 'paid' && debt.type === 'lent') {
           celebrate();
         }
@@ -179,6 +216,11 @@ const DebtTracker: React.FC = () => {
 
   const deleteDebt = async (debtId: string) => {
     try {
+      try {
+        await deleteFinancialNetworkByDebtId(debtId);
+      } catch (e) {
+        console.warn('financial_network delete:', e);
+      }
       // 1. Delete the debt record
       try {
         await deleteDoc(doc(db, 'debts', debtId));
@@ -231,6 +273,7 @@ const DebtTracker: React.FC = () => {
           ? debt.dueDate.toDate().toISOString().split('T')[0]
           : new Date().toISOString().split('T')[0],
       phoneNumber: debt.phoneNumber || '',
+      isBusiness: Boolean(debt.isBusiness),
     });
     setEditError(null);
   };
@@ -249,6 +292,10 @@ const DebtTracker: React.FC = () => {
       setEditError('Person name is required.');
       return;
     }
+    if (phoneDigitsCount(editFormData.phoneNumber) < 10) {
+      setEditError('Contact phone must have at least 10 digits.');
+      return;
+    }
 
     setIsEditSubmitting(true);
     try {
@@ -256,13 +303,28 @@ const DebtTracker: React.FC = () => {
 
       // 1. Update the debt document
       await updateDoc(doc(db, 'debts', debt.id), {
-        personName: editFormData.personName,
+        personName: editFormData.personName.trim(),
         amount: amountNum,
         type: editFormData.type,
         description: editFormData.description,
         dueDate: new Date(editFormData.dueDate),
-        phoneNumber: editFormData.phoneNumber,
+        phoneNumber: editFormData.phoneNumber.trim(),
+        isBusiness: editFormData.isBusiness,
       });
+
+      try {
+        await upsertFinancialNetworkEntry({
+          userId: user!.uid,
+          debtId: debt.id,
+          contactName: editFormData.personName.trim(),
+          contactPhone: editFormData.phoneNumber.trim(),
+          isBusiness: editFormData.isBusiness,
+          debtType: editFormData.type,
+          amount: amountNum,
+        });
+      } catch (e) {
+        console.error('financial_network sync (edit):', e);
+      }
 
       // 2. Delete all linked transactions so the balance recalculates correctly
       const q = query(collection(db, 'transactions'), where('debtId', '==', debt.id));
@@ -306,6 +368,19 @@ const DebtTracker: React.FC = () => {
           debtId: debt.id,
           createdAt: serverTimestamp(),
         });
+      }
+
+      {
+        const baseNote = `${editFormData.type === 'lent' ? 'Lent to' : 'Borrowed from'} ${editFormData.personName}`;
+        const parts: string[] = [editFormData.description, editFormData.personName, baseNote];
+        if (debt.status === 'paid') {
+          parts.push(
+            editFormData.type === 'lent'
+              ? `Debit Settlement (Collected from ${editFormData.personName})`
+              : `Debit Reversal (Pay to ${editFormData.personName})`,
+          );
+        }
+        mergeMarketingTagsFromTexts(user!.uid, parts).catch(() => {});
       }
 
       setEditingDebt(null);
@@ -610,14 +685,45 @@ const DebtTracker: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('phoneNumber')}</label>
+                    <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('phoneNumber')} *</label>
                     <input
                       type="tel"
+                      required
+                      autoComplete="tel"
                       value={formData.phoneNumber}
                       onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
                       className="w-full p-4 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none dark:text-white"
                     />
+                    <p className="text-xs text-slate-400">Minimum 10 digits</p>
                   </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-600 dark:bg-slate-800/50">
+                  <input
+                    id="add-debt-is-business"
+                    type="checkbox"
+                    checked={formData.isBusiness}
+                    onChange={(e) => setFormData({ ...formData, isBusiness: e.target.checked })}
+                    className="peer sr-only"
+                  />
+                  <label htmlFor="add-debt-is-business" className="flex cursor-pointer items-start gap-3">
+                    <span
+                      className={cn(
+                        'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500',
+                        formData.isBusiness
+                          ? 'border-blue-600 bg-blue-600 text-white'
+                          : 'border-slate-300 bg-white dark:border-slate-500 dark:bg-slate-700',
+                      )}
+                    >
+                      {formData.isBusiness ? '✓' : ''}
+                    </span>
+                    <span className="text-sm text-slate-700 dark:text-slate-200">
+                      <span className="font-semibold">Business / shop / agency</span>
+                      <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                        Check if money is owed to or from a company, store, or agent (not only an individual). Used for lead scoring.
+                      </span>
+                    </span>
+                  </label>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -788,15 +894,26 @@ const DebtTracker: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold uppercase tracking-wide text-slate-500">{t('phoneNumber')}</label>
+                    <label className="text-xs font-bold uppercase tracking-wide text-slate-500">{t('phoneNumber')} *</label>
                     <input
                       type="tel"
+                      required
                       value={editFormData.phoneNumber}
                       onChange={(e) => setEditFormData((p) => ({ ...p, phoneNumber: e.target.value }))}
                       className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
                     />
                   </div>
                 </div>
+
+                <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-600 dark:bg-slate-800/50">
+                  <input
+                    type="checkbox"
+                    checked={editFormData.isBusiness}
+                    onChange={(e) => setEditFormData((p) => ({ ...p, isBusiness: e.target.checked }))}
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">Business / shop / agency counterparty</span>
+                </label>
 
                 {/* Amount + Due Date */}
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

@@ -338,8 +338,100 @@ export interface PersonalFinanceTipResult {
   message: string;
 }
 
+/** Appended to AI push body so users see a non-advice disclaimer (Bangla). */
+export const REENGAGEMENT_NOTIFICATION_DISCLAIMER_BN =
+  ' বিঃদ্রঃ এটি কোনো আর্থিক পরামর্শ বা সিদ্ধান্তের বিকল্প নয়—শুধু ভাবনার খোরাক।';
+
+export interface ReengagementPushParams extends PersonalFinanceTipParams {
+  allTimeIncome: number;
+  allTimeExpense: number;
+  top3ExpenseCategories: { category: string; amount: number }[];
+  entriesPerWeekApprox: number;
+  recentNotesSample: string[];
+}
+
 const TIP_TITLE_MAX_CHARS = 52;
 const TIP_MESSAGE_MAX_CHARS = 140;
+
+const REENGAGE_TITLE_MAX = 56;
+const REENGAGE_CORE_MSG_MAX = 210;
+const REENGAGE_TOTAL_MSG_MAX = 380;
+
+function mergeDisclaimerIntoPushBody(core: string, disclaimer: string): string {
+  const c = core.trim();
+  if (!c) return disclaimer.trim();
+  if (/বিঃদ্রঃ|ভাবনার খোরাক|সিদ্ধান্তের বিকল্প/i.test(c)) {
+    return c.length > REENGAGE_TOTAL_MSG_MAX ? c.slice(0, REENGAGE_TOTAL_MSG_MAX - 1) + '…' : c;
+  }
+  let body = c.replace(/[।.!?\s]+$/u, '') + disclaimer;
+  if (body.length > REENGAGE_TOTAL_MSG_MAX) {
+    const budget = REENGAGE_TOTAL_MSG_MAX - disclaimer.length - 2;
+    const trimmed = c.slice(0, Math.max(80, budget)).trim();
+    body = trimmed + (trimmed.endsWith('।') ? '' : '…') + disclaimer;
+    if (body.length > REENGAGE_TOTAL_MSG_MAX) {
+      body = body.slice(0, REENGAGE_TOTAL_MSG_MAX - 1) + '…';
+    }
+  }
+  return body;
+}
+
+function buildReengagementPushPrompt(p: ReengagementPushParams, bucket: DirectNotifyCategoryBucket): string {
+  const name = p.displayName.trim() || 'বন্ধু';
+  const prof = p.profession.trim() || 'পেশাজীবী';
+  const cat =
+    p.topCategory && String(p.topCategory).trim() && String(p.topCategory).trim() !== 'N/A'
+      ? String(p.topCategory).trim()
+      : 'তথ্য নেই';
+  const daysLine =
+    p.daysSinceLastEntry === null
+      ? 'কোনো হিসাবের এন্ট্রি এখনো নেই (Ghost).'
+      : `শেষ এন্ট্রির পর ${p.daysSinceLastEntry} দিন।`;
+  const top3 =
+    p.top3ExpenseCategories.length > 0
+      ? p.top3ExpenseCategories.map((x) => `${x.category}: ${Math.round(x.amount)}`).join(' · ')
+      : 'তথ্য নেই';
+  const notes =
+    p.recentNotesSample.length > 0
+      ? p.recentNotesSample.slice(0, 8).join(' | ')
+      : 'নোট নেই';
+
+  const behaviorHint =
+    p.userType === 'Ghost User'
+      ? 'অগ্রাধিকার: প্রথম এন্ট্রির জন্য উৎসাহ; অ্যাপে ফিরে আসার আমন্ত্রণ।'
+      : p.userType === 'Irregular User'
+        ? `অগ্রাধিকার: নিষ্ক্রিয়তা (${p.daysSinceLastEntry ?? '—'} দিন) মাথায় রেখে মৃদু রি-এনগেজমেন্ট; হিসাব রাখার সুবিধা।`
+        : 'অগ্রাধিকার: ধারাবাহিকতার প্রশংসা + এক লাইনের ছোট টিপ।';
+
+  return `You write a mobile PUSH notification for the user of "Ay Bay Er GustiMari" (personal finance app). The user will read this on their phone.
+
+Admin analytics (do not mention "admin" or "analytics" to the user):
+- displayName: ${name}
+- profession: ${prof}
+- userType: ${p.userType}
+- days since last transaction entry: ${p.daysSinceLastEntry ?? 'never'}
+- thisMonthTopCategory label: ${cat}
+- allTimeIncome (number): ${p.allTimeIncome}
+- allTimeExpense (number): ${p.allTimeExpense}
+- top3 expense categories (all-time): ${top3}
+- approx entries per week (all-time): ${p.entriesPerWeekApprox}
+- sample notes from their entries: ${notes}
+
+${bucketInstructions(bucket)}
+
+Engagement instructions:
+- ${behaviorHint}
+- Warm, conversational Chalito Bengali; address by first name or "আপনি" naturally.
+- If they are inactive or Ghost, nudge them to open the app and log one small expense/income—no guilt.
+- Include ONE short, practical money thought (not a command to invest/borrow).
+- Do NOT include any disclaimer text in your JSON (a fixed disclaimer will be appended later by the app).
+- Do NOT claim to be a licensed advisor.
+
+Return ONLY raw JSON, no markdown:
+{
+  "title": "Short catchy Bangla title, max ${REENGAGE_TITLE_MAX} chars",
+  "message": "Body only, max ${REENGAGE_CORE_MSG_MAX} Unicode chars, one or two sentences, end with । or ! — no line breaks inside the string."
+}`;
+}
 
 /** Maps app category labels (e.g. Loan Installment, Debt) into prompt buckets. */
 export function classifyDirectNotifyCategoryBucket(raw: string): DirectNotifyCategoryBucket {
@@ -429,11 +521,14 @@ Hard rules:
 - Keys must be exactly "title" and "message" (English keys only).
 - "title": translate/summarize topCategory into natural Bangla. Max ${TIP_TITLE_MAX_CHARS} characters. If category unknown, use: আপনার আর্থিক আপডেট
 - "message": single notification body in Bengali. Max ${TIP_MESSAGE_MAX_CHARS} Unicode characters. One or two complete sentences; must end with । or ! or ? — no truncation mid-sentence; plan wording to fit.
-- Bengali only in the string values — no English sentences inside "title" or "message".`;
+- Bengali only in the string values — no English sentences inside "title" or "message".
+- CRITICAL for valid JSON: do not put raw line breaks inside "title" or "message" strings. Keep each value on one line, or use \\n if you must break a line. Escape any " inside a value as \\".
+- The entire output must be one compact JSON object with both keys present — never truncate before the final closing brace.`;
 }
 
 /**
  * Remove markdown code fences (e.g. ```json … ```) and isolate the outermost `{ … }` before JSON.parse.
+ * For incomplete JSON (MAX_TOKENS), avoid slicing at a stray `}` inside a string — prefer full text.
  */
 function stripMarkdownCodeBlocksForDirectNotifyJson(raw: string): string {
   let t = raw.trim();
@@ -442,14 +537,128 @@ function stripMarkdownCodeBlocksForDirectNotifyJson(raw: string): string {
     t = t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
   }
   const start = t.indexOf('{');
-  const end = t.lastIndexOf('}');
-  if (start >= 0 && end > start) {
-    t = t.slice(start, end + 1);
+  if (start < 0) return t;
+  const rest = t.slice(start);
+  const end = rest.lastIndexOf('}');
+  if (end > 0) {
+    const candidate = rest.slice(0, end + 1);
+    try {
+      JSON.parse(candidate);
+      return candidate.trim();
+    } catch {
+      /* likely truncated or invalid — keep from first { to end so recovery can scan */
+    }
   }
-  return t.trim();
+  return rest.trim();
 }
 
-function parsePersonalFinanceTipJson(raw: string, fallbackTitle: string): PersonalFinanceTipResult {
+/**
+ * Scan a JSON string value starting at `start` (first char after opening `"`).
+ * Handles escapes; if the closing `"` is missing (truncated output), returns everything until EOF.
+ */
+function scanJsonStringValueChars(text: string, start: number): string {
+  let out = '';
+  let j = start;
+  while (j < text.length) {
+    const c = text[j];
+    if (c === '\\' && j + 1 < text.length) {
+      const n = text[j + 1];
+      if (n === 'n') {
+        out += '\n';
+        j += 2;
+        continue;
+      }
+      if (n === 'r') {
+        out += '\r';
+        j += 2;
+        continue;
+      }
+      if (n === 't') {
+        out += '\t';
+        j += 2;
+        continue;
+      }
+      if (n === '"' || n === '\\' || n === '/') {
+        out += n;
+        j += 2;
+        continue;
+      }
+      if (n === 'u' && j + 5 < text.length) {
+        const hex = text.slice(j + 2, j + 6);
+        if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+          out += String.fromCharCode(parseInt(hex, 16));
+          j += 6;
+          continue;
+        }
+      }
+      out += c;
+      j++;
+      continue;
+    }
+    if (c === '"') break;
+    out += c;
+    j++;
+  }
+  return out;
+}
+
+/** Extract "key": "value" string when JSON.parse fails (truncated MAX_TOKENS, bad escapes). */
+function extractJsonStringField(text: string, key: string): string | null {
+  const esc = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`"${esc}"\\s*:\\s*"`, 'm');
+  const m = re.exec(text);
+  if (!m || m.index === undefined) return null;
+  const valueStart = m.index + m[0].length;
+  const value = scanJsonStringValueChars(text, valueStart).trim();
+  return value.length ? value : null;
+}
+
+function recoverDirectNotifyFieldsFromBrokenJson(
+  raw: string,
+  fallbackTitle: string,
+): PersonalFinanceTipResult | null {
+  const title = extractJsonStringField(raw, 'title') ?? fallbackTitle;
+  const message = extractJsonStringField(raw, 'message');
+  if (!message?.trim()) return null;
+  return clampPersonalFinanceTipResult(
+    title.trim() || fallbackTitle,
+    message.trim(),
+    fallbackTitle,
+  );
+}
+
+function clampPersonalFinanceTipResult(
+  title: string,
+  message: string,
+  fallbackTitle: string,
+  limits?: { maxTitle: number; maxMessage: number },
+): PersonalFinanceTipResult {
+  const maxT = limits?.maxTitle ?? TIP_TITLE_MAX_CHARS;
+  const maxM = limits?.maxMessage ?? TIP_MESSAGE_MAX_CHARS;
+  let t = title.trim() || fallbackTitle;
+  let m = message.trim();
+  if (!m) {
+    throw new Error('AI returned an empty message.');
+  }
+  if (t.length > maxT) {
+    t = t.slice(0, maxT - 1).trim() + '…';
+  }
+  if (m.length > maxM) {
+    m = m.slice(0, maxM);
+    const sp = m.lastIndexOf(' ');
+    if (sp > maxM * 0.55) m = m.slice(0, sp).trim();
+    if (m.length > maxM) {
+      m = m.slice(0, maxM - 1).trim() + '…';
+    }
+  }
+  return { title: t, message: m };
+}
+
+function parsePersonalFinanceTipJson(
+  raw: string,
+  fallbackTitle: string,
+  limits?: { maxTitle: number; maxMessage: number },
+): PersonalFinanceTipResult {
   const cleaned = stripMarkdownCodeBlocksForDirectNotifyJson(raw);
 
   let parsed: { title?: unknown; message?: unknown; titleBn?: unknown; messageBn?: unknown };
@@ -459,6 +668,11 @@ function parsePersonalFinanceTipJson(raw: string, fallbackTitle: string): Person
     try {
       parsed = JSON.parse(sanitizeJson(cleaned)) as typeof parsed;
     } catch {
+      const recovered = recoverDirectNotifyFieldsFromBrokenJson(raw, fallbackTitle);
+      if (recovered) {
+        console.warn('[DirectNotify AI] Used tolerant JSON recovery (truncated or malformed output).');
+        return recovered;
+      }
       console.error('[DirectNotify AI] JSON.parse failed. Raw model output:', raw);
       const hint =
         'Could not parse the AI response as JSON (invalid format or extra text). ' +
@@ -482,25 +696,14 @@ function parsePersonalFinanceTipJson(raw: string, fallbackTitle: string): Person
         : '';
 
   if (!message) {
+    const recovered = recoverDirectNotifyFieldsFromBrokenJson(raw, fallbackTitle);
+    if (recovered) return recovered;
     throw new Error('AI returned an empty message.');
   }
 
   if (!title) title = fallbackTitle;
 
-  if (title.length > TIP_TITLE_MAX_CHARS) {
-    title = title.slice(0, TIP_TITLE_MAX_CHARS - 1).trim() + '…';
-  }
-
-  if (message.length > TIP_MESSAGE_MAX_CHARS) {
-    message = message.slice(0, TIP_MESSAGE_MAX_CHARS);
-    const sp = message.lastIndexOf(' ');
-    if (sp > TIP_MESSAGE_MAX_CHARS * 0.55) message = message.slice(0, sp).trim();
-    if (message.length > TIP_MESSAGE_MAX_CHARS) {
-      message = message.slice(0, TIP_MESSAGE_MAX_CHARS - 1).trim() + '…';
-    }
-  }
-
-  return { title, message };
+  return clampPersonalFinanceTipResult(title, message, fallbackTitle, limits);
 }
 
 /**
@@ -530,7 +733,8 @@ export async function generatePersonalFinanceTip(params: PersonalFinanceTipParam
     responseMimeType: 'application/json' as const,
     temperature: 0.78,
     topP: 0.9,
-    maxOutputTokens: 1024,
+    /** Small JSON only, but Flash sometimes needed extra headroom to finish closing braces. */
+    maxOutputTokens: 2048,
   };
 
   for (const modelName of TIP_MODEL_CANDIDATES) {
@@ -587,5 +791,169 @@ export async function generatePersonalFinanceTip(params: PersonalFinanceTipParam
 
   throw new Error(
     `No Gemini model available for tips. Tried: ${TIP_MODEL_CANDIDATES.join(', ')}`,
+  );
+}
+
+/**
+ * Rich-context re-engagement push for one user (all-time stats + notes).
+ * Appends {@link REENGAGEMENT_NOTIFICATION_DISCLAIMER_BN} to the body automatically.
+ */
+export async function generateReengagementPushForUser(
+  params: ReengagementPushParams,
+): Promise<PersonalFinanceTipResult> {
+  if (!GEMINI_API_KEY) {
+    throw new Error(
+      'Gemini API key is not configured. Add VITE_GEMINI_API_KEY to your .env file.',
+    );
+  }
+
+  const catRaw =
+    params.topCategory && String(params.topCategory).trim() && String(params.topCategory).trim() !== 'N/A'
+      ? String(params.topCategory).trim()
+      : '';
+  const bucket = classifyDirectNotifyCategoryBucket(catRaw);
+  const fallbackTitle = 'Ay Bay Er GustiMari';
+
+  const prompt = buildReengagementPushPrompt(params, bucket);
+
+  const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+  const errors: string[] = [];
+
+  const baseReengageConfig = {
+    responseMimeType: 'application/json' as const,
+    temperature: 0.82,
+    topP: 0.92,
+    maxOutputTokens: 2048,
+  };
+
+  for (const modelName of TIP_MODEL_CANDIDATES) {
+    try {
+      const run = async (useSchema: boolean) => {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: useSchema
+            ? { ...baseReengageConfig, responseSchema: DIRECT_NOTIFY_RESPONSE_SCHEMA }
+            : baseReengageConfig,
+        });
+        const result = await model.generateContent(prompt);
+        const raw = getDirectNotifyRawText(result.response);
+        const parsed = parsePersonalFinanceTipJson(raw, fallbackTitle, {
+          maxTitle: REENGAGE_TITLE_MAX,
+          maxMessage: REENGAGE_CORE_MSG_MAX,
+        });
+        return {
+          title: parsed.title,
+          message: mergeDisclaimerIntoPushBody(parsed.message, REENGAGEMENT_NOTIFICATION_DISCLAIMER_BN),
+        };
+      };
+
+      try {
+        return await run(true);
+      } catch (first: unknown) {
+        const msg = first instanceof Error ? first.message : String(first);
+        if (
+          /responseSchema|schema|invalid argument|400|unsupported/i.test(msg) &&
+          !/parse|JSON|empty/i.test(msg)
+        ) {
+          return await run(false);
+        }
+        throw first;
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('429') || /quota/i.test(msg)) {
+        throw new Error('Gemini API quota exceeded (429). Please wait and try again.');
+      }
+      if (msg.includes('404') || /not found/i.test(msg)) {
+        errors.push(`${modelName}: unavailable`);
+        continue;
+      }
+      throw new Error(`Gemini: ${msg.slice(0, 400)}`);
+    }
+  }
+
+  throw new Error(
+    `No Gemini model available for re-engagement push. Tried: ${TIP_MODEL_CANDIDATES.join(', ')}`,
+  );
+}
+
+/** Prefer Gemini 1.5 Flash for admin User Monitoring Board strategic insight. */
+const ADMIN_STRATEGIC_MODEL_CANDIDATES = [
+  'gemini-1.5-flash',
+  'gemini-2.5-flash',
+  'gemini-2.0-flash-lite',
+  'gemini-2.5-flash-lite',
+] as const;
+
+/**
+ * Admin-only insight: financial persona + one concrete marketing move.
+ * Model speaks to the administrator, not the end user.
+ */
+export async function generateAdminUserStrategicInsight(adminDataSummary: string): Promise<string> {
+  if (!GEMINI_API_KEY) {
+    throw new Error(
+      'Gemini API key is not configured. Add VITE_GEMINI_API_KEY to your .env file.',
+    );
+  }
+
+  const prompt = `You are a growth and product strategist assisting the ADMINISTRATOR of the personal finance app "Ay Bay Er GustiMari".
+
+CRITICAL RULES:
+- Do NOT address the end user. Never write "you" meaning the customer.
+- Write only for the ADMIN: use "This user", "They", and imperative advice to the admin ("Offer them…", "Consider sending…").
+- Plain text only. No markdown headings, no bullet markdown, no JSON.
+
+User data summary (may include JSON with fields such as monthlyIncome, estimatedOutstandingBorrowedDebt, topExpenseCategories, lqiScore, leadTier):
+---
+${adminDataSummary}
+---
+
+You are optimizing lead generation for "Ay Bay Er GustiMari" (personal finance app with optional Pro / premium features).
+
+1) Using their income, debt (borrowed/outstanding if provided), and top expense categories, assign a concise persona label (examples: Aspiring Entrepreneur, Wealthy Professional, Budget-Conscious Salaried, Side-Hustle Earner, Debt-Focused User — pick one that fits best).
+
+2) In 2–4 sentences, describe their financial behavior and what that implies for upsell risk/reward.
+
+3) Recommend one specific product or Pro feature to push next via in-app or push notification (name the feature plainly, e.g. "export & reports", "category budgets", "debt reminders", "family multi-user", etc.) and one sentence on why it fits this persona.
+
+4) Still give ONE concrete marketing angle or campaign hook the admin can use (can overlap with (3) if tight).
+
+Keep speaking only to the admin. Plain text, no markdown.`;
+
+  const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+  const errors: string[] = [];
+
+  for (const modelName of ADMIN_STRATEGIC_MODEL_CANDIDATES) {
+    try {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        generationConfig: {
+          temperature: 0.72,
+          topP: 0.9,
+          maxOutputTokens: 1024,
+        },
+      });
+      const result = await model.generateContent(prompt);
+      const text = result.response.text().replace(/^\uFEFF/, '').trim();
+      if (!text) {
+        throw new Error('Gemini returned an empty response.');
+      }
+      console.info(`[Gemini] Admin strategic insight — model: ${modelName}`);
+      return text;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('429') || /quota/i.test(msg)) {
+        throw new Error('Gemini API quota exceeded (429). Please wait and try again.');
+      }
+      if (msg.includes('404') || /not found/i.test(msg)) {
+        errors.push(`${modelName}: unavailable`);
+        continue;
+      }
+      throw new Error(`Gemini API error (${modelName}): ${msg.slice(0, 400)}`);
+    }
+  }
+
+  throw new Error(
+    `No Gemini model available for admin insight.\nTried: ${ADMIN_STRATEGIC_MODEL_CANDIDATES.join(', ')}\n${errors.join('\n')}`,
   );
 }

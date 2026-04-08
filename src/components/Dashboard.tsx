@@ -83,7 +83,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
   const { transactions = [], debts = [] } = useTransactions();
   const { t, language } = useLocalization();
   const { userProfile, user } = useAuth();
-  const { showWelcomeModal, closeWelcomeModal } = useWelcomeBack(user?.uid);
+  const { showWelcomeModal, closeWelcomeModal, welcomeBackReady } = useWelcomeBack(user?.uid);
   const { selectedMonthKey: monthKey, currentMonthKey } = useMonthSelection();
   const isViewingCurrentCalendarMonth = monthKey === currentMonthKey;
   const isHistoryMode = !isViewingCurrentCalendarMonth;
@@ -981,7 +981,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
         )}
       </AnimatePresence>
 
-      <WelcomeBackModal open={showWelcomeModal} onClose={closeWelcomeModal} />
+      <WelcomeBackModal open={welcomeBackReady && showWelcomeModal} onClose={closeWelcomeModal} />
     </div>
   );
 };

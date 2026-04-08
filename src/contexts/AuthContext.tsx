@@ -1,7 +1,14 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { User, onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth, db } from '../firebaseConfig';
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import {
+  doc,
+  getDoc,
+  updateDoc,
+  serverTimestamp,
+  onSnapshot,
+  runTransaction,
+} from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import {
   getDefaultCategoriesForNewUser,
@@ -73,7 +80,10 @@ export interface UserProfile {
   language?: string;
   budgetLimit?: number;
   phoneNumber?: string;
+  /** Canonical completion flag (Firestore). */
   onboardingCompleted?: boolean;
+  /** Legacy / mistaken field name — read-only fallback in routing. */
+  onboardingComplete?: boolean;
   profession?: string;
   familyMembers?: string[];
   incomeCategories?: string[];
@@ -86,15 +96,26 @@ export interface UserProfile {
   createdAt?: unknown;
   /** Last dashboard/session activity; used for Welcome Back (>= 7 days inactive). */
   lastActive?: unknown;
+  /** Set once per browser session on first profile sync after sign-in (admin list sort). */
+  lastLoginAt?: unknown;
 }
 
 const AuthContext = createContext<AuthContextType>({ user: null, loading: true, userProfile: null });
 const FORCE_RELOGIN_NOTICE_KEY = 'force-relogin-notice';
 
+/** True when setup is complete (supports legacy `onboardingComplete` field name). */
+export function isOnboardingComplete(profile: UserProfile | null | undefined): boolean {
+  if (!profile) return false;
+  if (profile.onboardingCompleted === true) return true;
+  return profile.onboardingComplete === true;
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const lastLoginStampedForUid = useRef<string | null>(null);
+  const lastKnownAuthUid = useRef<string | null>(null);
 
   useEffect(() => {
     let unsubscribeProfile: (() => void) | null = null;
@@ -107,9 +128,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       setUser(user);
-      if (user) {
-        const userDocRef = doc(db, 'users', user.uid);
-        unsubscribeProfile = onSnapshot(userDocRef, (docSnap) => {
+      if (!user) {
+        if (lastKnownAuthUid.current) {
+          sessionStorage.removeItem(`gustimari_lastLogin_${lastKnownAuthUid.current}`);
+          lastKnownAuthUid.current = null;
+        }
+        lastLoginStampedForUid.current = null;
+        setUserProfile(null);
+        setLoading(false);
+        return;
+      }
+
+      lastKnownAuthUid.current = user.uid;
+      setUserProfile(null);
+      setLoading(true);
+      const userDocRef = doc(db, 'users', user.uid);
+      unsubscribeProfile = onSnapshot(
+        userDocRef,
+        (docSnap) => {
           if (docSnap.exists()) {
             const profile = docSnap.data() as UserProfile;
 
@@ -131,6 +167,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             setUserProfile(profile);
 
+            // One lastLoginAt write per browser session per uid (admin sorts by recent login).
+            if (lastLoginStampedForUid.current !== user.uid) {
+              const sessKey = `gustimari_lastLogin_${user.uid}`;
+              if (!sessionStorage.getItem(sessKey)) {
+                sessionStorage.setItem(sessKey, '1');
+                lastLoginStampedForUid.current = user.uid;
+                void updateDoc(userDocRef, { lastLoginAt: serverTimestamp() }).catch((err) => {
+                  console.warn('[Auth] lastLoginAt update skipped:', err);
+                });
+              } else {
+                lastLoginStampedForUid.current = user.uid;
+              }
+            }
+
             if (profile.hideFromAdminList) {
               updateDoc(userDocRef, {
                 hideFromAdminList: false,
@@ -141,8 +191,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
 
             void initializeUniversalCategories(user.uid, profile.expenseCategories);
+            setLoading(false);
           } else {
-            // Create profile if it doesn't exist — universals + starter lists, deduped
+            // Create profile only if missing — never merge default arrays/flags onto an
+            // existing doc (late setDoc used to overwrite onboardingCompleted, profession,
+            // phoneNumber, and category lists after redirect or parallel writes).
             const initialCats = getDefaultCategoriesForNewUser();
             const incomeCategories = mergeUniqueCategoryLists([
               UNIVERSAL_INCOME_CATEGORIES,
@@ -152,8 +205,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               UNIVERSAL_EXPENSE_CATEGORIES,
               initialCats.expense,
             ]);
-            // merge: true — avoids wiping fields if this races with onboarding/profession updates.
-            // Omit phoneNumber here so a late write never stamps '' over a saved number.
             const newProfile: Record<string, unknown> = {
               uid: user.uid,
               displayName: user.displayName,
@@ -161,27 +212,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               photoURL: user.photoURL,
               language: 'en',
               budgetLimit: 0,
-              profession: '',
-              onboardingCompleted: false,
               familyMembers: ['Self'],
               incomeCategories,
               expenseCategories,
               createdAt: serverTimestamp(),
               role: user.email === 'chotan4480@gmail.com' ? 'admin' : 'user',
             };
-            setDoc(userDocRef, newProfile, { merge: true }).catch((err) => {
-              handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}`);
-            });
+            void (async () => {
+              try {
+                await runTransaction(db, async (transaction) => {
+                  const snap = await transaction.get(userDocRef);
+                  if (snap.exists()) return;
+                  transaction.set(userDocRef, newProfile);
+                });
+                const snap = await getDoc(userDocRef);
+                if (snap.exists()) {
+                  setUserProfile(snap.data() as UserProfile);
+                }
+              } catch (err) {
+                handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}`);
+                try {
+                  const snap = await getDoc(userDocRef);
+                  if (snap.exists()) {
+                    setUserProfile(snap.data() as UserProfile);
+                  }
+                } catch {
+                  /* ignore */
+                }
+              } finally {
+                setLoading(false);
+              }
+            })();
           }
-          setLoading(false);
-        }, (error) => {
+        },
+        (error) => {
           handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
           setLoading(false);
-        });
-      } else {
-        setUserProfile(null);
-        setLoading(false);
-      }
+        },
+      );
     });
 
     return () => {

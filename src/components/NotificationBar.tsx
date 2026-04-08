@@ -133,7 +133,7 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
     setSelectedNotification(notif);
   };
 
-  /** Marks read in Firestore, then closes (unread items show "পড়ুন" until dismiss or link tap). */
+  /** Marks read in Firestore, then closes (link row uses "পড়া হয়েছে" for the open-URL action; read state is disabled). */
   const closeNotificationModal = () => {
     setSelectedNotification((current) => {
       if (current) void markNotificationRead(current);
@@ -693,7 +693,7 @@ const NotificationBarBase: React.FC<NotificationBarProps> = ({ userId }) => {
                               'shadow-indigo-500/35 hover:brightness-110 sm:flex-initial'
                             )}
                           >
-                            পড়ুন
+                            পড়া হয়েছে
                           </button>
                         )
                       ) : (
