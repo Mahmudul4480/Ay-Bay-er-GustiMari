@@ -1,3 +1,6 @@
+import { initPwaInstallCapture } from './lib/pwaInstallCapture';
+initPwaInstallCapture();
+
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';

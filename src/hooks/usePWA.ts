@@ -6,15 +6,16 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { isMobileOrTabletBrowserClient } from '../lib/deviceDetection';
+import {
+  type PWAInstallPromptEvent,
+  PWA_DEFERRED_CHANGED,
+  clearCapturedDeferredPrompt,
+  getCapturedDeferredPrompt,
+} from '../lib/pwaInstallCapture';
 
 const DISMISS_KEY = 'pwa-install-banner-dismissed';
 
-/** Narrow type for the deferred install event (not in all TS lib DOM typings). */
-export interface PWAInstallPromptEvent extends Event {
-  readonly platforms?: string[];
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
-}
+export type { PWAInstallPromptEvent };
 
 function isStandaloneDisplay(): boolean {
   if (typeof window === 'undefined') return false;
@@ -50,7 +51,13 @@ export interface UsePWAReturn {
 }
 
 export function usePWA(): UsePWAReturn {
-  const [deferredPrompt, setDeferredPrompt] = useState<PWAInstallPromptEvent | null>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<PWAInstallPromptEvent | null>(() =>
+    typeof window !== 'undefined' ? getCapturedDeferredPrompt() : null
+  );
+
+  /** React state can lag behind `window.__pwaDeferredInstallPrompt` — merge every render for UI + installApp. */
+  const effectiveDeferredPrompt =
+    deferredPrompt ?? (typeof window !== 'undefined' ? getCapturedDeferredPrompt() : null);
   const [isStandalone, setIsStandalone] = useState(isStandaloneDisplay);
   const [dismissed, setDismissed] = useState(() => {
     if (typeof window === 'undefined') return false;
@@ -70,16 +77,27 @@ export function usePWA(): UsePWAReturn {
   }, []);
 
   useEffect(() => {
-    const handler = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e as PWAInstallPromptEvent);
+    const sync = () => setDeferredPrompt(getCapturedDeferredPrompt());
+    sync();
+    window.addEventListener(PWA_DEFERRED_CHANGED, sync);
+    return () => window.removeEventListener(PWA_DEFERRED_CHANGED, sync);
+  }, []);
+
+  /** Late `beforeinstallprompt` (e.g. after SW ready) — nudge React state without waiting for user interaction. */
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const w = getCapturedDeferredPrompt();
+      if (w) setDeferredPrompt((prev) => prev ?? w);
+    }, 400);
+    const stop = window.setTimeout(() => window.clearInterval(id), 15000);
+    return () => {
+      window.clearInterval(id);
+      window.clearTimeout(stop);
     };
-    window.addEventListener('beforeinstallprompt', handler);
-    return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
   const installApp = useCallback(async () => {
-    const ev = deferredPrompt;
+    const ev = getCapturedDeferredPrompt() ?? deferredPrompt;
     if (!ev) return;
     try {
       await ev.prompt();
@@ -87,6 +105,7 @@ export function usePWA(): UsePWAReturn {
     } catch (err) {
       console.warn('[usePWA] install prompt failed:', err);
     } finally {
+      clearCapturedDeferredPrompt();
       setDeferredPrompt(null);
     }
   }, [deferredPrompt]);
@@ -100,7 +119,7 @@ export function usePWA(): UsePWAReturn {
     }
   }, []);
 
-  const isInstallable = deferredPrompt !== null;
+  const isInstallable = effectiveDeferredPrompt !== null;
   const showIOSInstallGuide =
     !isStandalone && isIOSDevice() && !isInstallable;
   /**
@@ -114,7 +133,7 @@ export function usePWA(): UsePWAReturn {
     isMobileOrTabletBrowserClient();
 
   return {
-    deferredPrompt,
+    deferredPrompt: effectiveDeferredPrompt,
     isInstallable,
     isStandalone,
     showIOSInstallGuide,
