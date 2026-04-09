@@ -24,8 +24,8 @@ import WelcomeOverlay from './components/WelcomeOverlay';
 import { useNotifications } from './hooks/useNotifications';
 import { useWelcomeBack } from './hooks/useWelcomeBack';
 import NotificationBar from './components/NotificationBar';
-import InstallPWA from './components/InstallPWA';
 import { usePeerBenchmarkInsight, peerSidebarSubtitle } from './hooks/usePeerBenchmarkInsight';
+import { usePWA } from './hooks/usePWA';
 
 const ADMIN_EMAIL = 'chotan4480@gmail.com';
 const FORCE_RELOGIN_NOTICE_KEY = 'force-relogin-notice';
@@ -104,6 +104,7 @@ const AppContent: React.FC = () => {
   );
 
   const peerInsight = usePeerBenchmarkInsight();
+  const pwaInstall = usePWA();
 
   const goDashboardFromPeerNav = React.useCallback(() => {
     setActiveTab('dashboard');
@@ -653,7 +654,9 @@ const AppContent: React.FC = () => {
 
         {/* Main Content */}
         <main className="mx-auto w-full min-w-0 max-w-7xl flex-1 overflow-x-hidden p-3 pb-24 sm:p-4 md:p-8 md:pb-8">
-          {activeTab === 'dashboard' && <Dashboard onTabChange={setActiveTab} />}
+          {activeTab === 'dashboard' && (
+            <Dashboard onTabChange={setActiveTab} pwaInstall={pwaInstall} />
+          )}
         {activeTab === 'transactions' && <TransactionList />}
         {activeTab === 'debts' && <DebtTracker />}
         {activeTab === 'smarttips' && <SmartTipsList onBack={() => setActiveTab('dashboard')} />}
@@ -698,7 +701,6 @@ export default function App() {
           <MonthSelectionProvider>
             <TransactionsProvider>
               <AppContent />
-              <InstallPWA />
             </TransactionsProvider>
           </MonthSelectionProvider>
         </TransactionFeedbackProvider>

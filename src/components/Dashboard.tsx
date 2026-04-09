@@ -39,6 +39,8 @@ import { deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { computeFinancialPersona, type PersonaId } from '../lib/financialPersona';
+import type { UsePWAReturn } from '../hooks/usePWA';
+import DashboardInstallAppBar from './DashboardInstallAppBar';
 
 const PERSONA_TAG_EN: Record<PersonaId, string> = {
   saver: 'The Saver',
@@ -50,6 +52,7 @@ const PERSONA_TAG_EN: Record<PersonaId, string> = {
 
 interface DashboardProps {
   onTabChange?: (tab: string) => void;
+  pwaInstall: UsePWAReturn;
 }
 
 /** Firestore may deserialize numbers as strings; always coerce before math. */
@@ -86,7 +89,7 @@ function renderPieActiveShape(props: PieSectorDataItem) {
   );
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
+const Dashboard: React.FC<DashboardProps> = ({ onTabChange, pwaInstall }) => {
   const { transactions = [], debts = [] } = useTransactions();
   const { t, language } = useLocalization();
   const { userProfile, user } = useAuth();
@@ -347,6 +350,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange }) => {
           <MonthPicker variant="prominent" className="w-full sm:max-w-2xl lg:shrink-0" />
         </div>
       </section>
+
+      <DashboardInstallAppBar language={language} pwa={pwaInstall} />
 
       <div className="flex w-full min-w-0 flex-col gap-4">
         {user && (
