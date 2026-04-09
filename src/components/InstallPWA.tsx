@@ -13,6 +13,7 @@ export default function InstallPWA() {
     isInstallable,
     isStandalone,
     showIOSInstallGuide,
+    showMobileManualInstall,
     dismissed,
     dismiss,
     installApp,
@@ -22,7 +23,7 @@ export default function InstallPWA() {
     !isInAppBrowser() &&
     !isStandalone &&
     !dismissed &&
-    (isInstallable || showIOSInstallGuide);
+    (isInstallable || showIOSInstallGuide || showMobileManualInstall);
 
   if (isStandalone) return null;
 
@@ -36,7 +37,7 @@ export default function InstallPWA() {
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: 120, opacity: 0 }}
           transition={{ type: 'spring', damping: 28, stiffness: 320 }}
-          className="fixed inset-x-0 bottom-[5.5rem] z-[60] pointer-events-none flex justify-center px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:bottom-8 sm:px-4"
+          className="fixed inset-x-0 bottom-[5.5rem] z-[100] pointer-events-none flex justify-center px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:bottom-8 sm:px-4"
         >
           <div className="pointer-events-auto w-full max-w-lg">
             <div
@@ -73,6 +74,14 @@ export default function InstallPWA() {
                       <strong className="text-white">Add to Home Screen</strong>।
                       ক্রোম iOS-এ একই মেনু থেকে হোম স্ক্রিনে যোগ করুন।
                     </p>
+                  ) : showMobileManualInstall ? (
+                    <p className="text-xs leading-relaxed text-slate-300">
+                      <strong className="text-white">Chrome / Samsung Internet:</strong> মেনু{' '}
+                      <span className="whitespace-nowrap font-mono text-indigo-200">(⋮)</span> বা{' '}
+                      <strong className="text-white">Install app</strong> /{' '}
+                      <strong className="text-white">Add to Home screen</strong> বেছে নিন। অন্য
+                      ব্রাউজারে অনুরূপ বিকল্প খুঁজুন।
+                    </p>
                   ) : (
                     <p className="text-xs text-slate-400">
                       হোম স্ক্রিনে যোগ করলে দ্রুত খুলবে ও ফুলস্ক্রিন অভিজ্ঞতা পাবেন।
@@ -99,8 +108,10 @@ export default function InstallPWA() {
                     </span>
                   </motion.button>
                 ) : (
-                  <p className="shrink-0 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-center text-[11px] font-medium text-slate-300 sm:max-w-[140px]">
-                    উপরের নির্দেশ অনুসরণ করুন
+                  <p className="shrink-0 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-center text-[11px] font-medium leading-snug text-slate-200 sm:max-w-[160px]">
+                    {showMobileManualInstall
+                      ? 'মেনু থেকে ইন্সটল করুন'
+                      : 'উপরের নির্দেশ অনুসরণ করুন'}
                   </p>
                 )}
               </div>

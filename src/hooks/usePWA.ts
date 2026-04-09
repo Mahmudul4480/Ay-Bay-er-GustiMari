@@ -5,6 +5,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { isMobileOrTabletBrowserClient } from '../lib/deviceDetection';
 
 const DISMISS_KEY = 'pwa-install-banner-dismissed';
 
@@ -39,6 +40,8 @@ export interface UsePWAReturn {
   isStandalone: boolean;
   /** iOS: no `beforeinstallprompt` — show manual “Add to Home Screen” steps. */
   showIOSInstallGuide: boolean;
+  /** Android / tablet: no deferred prompt yet — show browser menu install steps. */
+  showMobileManualInstall: boolean;
   /** User tapped “Later” — persisted in sessionStorage-style localStorage. */
   dismissed: boolean;
   dismiss: () => void;
@@ -100,12 +103,22 @@ export function usePWA(): UsePWAReturn {
   const isInstallable = deferredPrompt !== null;
   const showIOSInstallGuide =
     !isStandalone && isIOSDevice() && !isInstallable;
+  /**
+   * Many mobile browsers never fire `beforeinstallprompt` (or fire late). Desktop Chrome
+   * often fires it immediately — that’s why the bar appeared only on desktop before.
+   */
+  const showMobileManualInstall =
+    !isStandalone &&
+    !isInstallable &&
+    !showIOSInstallGuide &&
+    isMobileOrTabletBrowserClient();
 
   return {
     deferredPrompt,
     isInstallable,
     isStandalone,
     showIOSInstallGuide,
+    showMobileManualInstall,
     dismissed,
     dismiss,
     installApp,

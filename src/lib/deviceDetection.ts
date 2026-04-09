@@ -120,6 +120,25 @@ export function detectClientDevice(userAgent?: string): ClientDeviceInfo {
   };
 }
 
+/**
+ * Handset / tablet (or touch + narrow viewport) — used when `beforeinstallprompt`
+ * may never fire but we still want an “install / add to home screen” hint.
+ */
+export function isMobileOrTabletBrowserClient(): boolean {
+  if (typeof navigator === 'undefined' || typeof window === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua)) return true;
+  if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return true;
+  try {
+    const coarse = window.matchMedia?.('(pointer: coarse)')?.matches;
+    const narrow = window.matchMedia?.('(max-width: 1023px)')?.matches;
+    if (coarse && narrow) return true;
+  } catch {
+    /* matchMedia unavailable */
+  }
+  return false;
+}
+
 /** Normalize stored Firestore string to a known OS bucket for UI. */
 export function normalizeStoredOs(os: string | undefined | null): DetectedOs {
   const s = String(os ?? '').trim().toLowerCase();
