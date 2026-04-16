@@ -53,6 +53,8 @@ const PERSONA_TAG_EN: Record<PersonaId, string> = {
 interface DashboardProps {
   onTabChange?: (tab: string) => void;
   pwaInstall: UsePWAReturn;
+  wishlistFocusSignal?: number;
+  zakatFocusSignal?: number;
 }
 
 /** Firestore may deserialize numbers as strings; always coerce before math. */
@@ -89,7 +91,12 @@ function renderPieActiveShape(props: PieSectorDataItem) {
   );
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onTabChange, pwaInstall }) => {
+const Dashboard: React.FC<DashboardProps> = ({
+  onTabChange,
+  pwaInstall,
+  wishlistFocusSignal = 0,
+  zakatFocusSignal = 0,
+}) => {
   const { transactions = [], debts = [] } = useTransactions();
   const { t, language } = useLocalization();
   const { userProfile, user } = useAuth();
@@ -519,6 +526,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onTabChange, pwaInstall }) => {
           transactions={transactions}
           language={language === 'bn' ? 'bn' : 'en'}
           cardShell={cardShell}
+          wishlistFocusSignal={wishlistFocusSignal}
+          zakatFocusSignal={zakatFocusSignal}
         />
       )}
 

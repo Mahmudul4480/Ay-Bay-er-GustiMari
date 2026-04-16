@@ -18,7 +18,6 @@ import {
   Plane,
   Home,
   Laptop,
-  Lock,
   Box,
 } from 'lucide-react';
 import type { Transaction } from '../../hooks/useTransactions';
@@ -37,7 +36,6 @@ import {
   type WealthVault,
   type WishlistItem,
 } from '../../lib/growthFinance';
-import { isWealthVaultUnlocked } from '../../lib/wealthVaultAccess';
 import { syncUserWealthDocument } from '../../lib/wealthIntelligenceSync';
 import {
   PieChart,
@@ -171,6 +169,10 @@ export interface GrowthDashboardSectionsProps {
   transactions: Transaction[];
   language: 'en' | 'bn';
   cardShell: (...extra: (string | boolean | undefined)[]) => string;
+  /** Increment (e.g. from speed dial) to scroll to wishlist / dream entry and focus the name field. */
+  wishlistFocusSignal?: number;
+  /** Increment to scroll to Zakat / wealth vault estimate. */
+  zakatFocusSignal?: number;
 }
 
 function parseWishlist(raw: unknown): WishlistItem[] {
@@ -225,13 +227,13 @@ const GrowthDashboardSections: React.FC<GrowthDashboardSectionsProps> = ({
   transactions,
   language,
   cardShell,
+  wishlistFocusSignal = 0,
+  zakatFocusSignal = 0,
 }) => {
   const { user, userProfile } = useAuth();
   const uid = user?.uid;
   const cashAllTime = useMemo(() => computeAllTimeCashBalance(transactions), [transactions]);
   const persona = useMemo(() => computeFinancialPersona(transactions), [transactions]);
-  const vaultUnlocked = isWealthVaultUnlocked(userProfile);
-
   const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
   const [vault, setVault] = useState<WealthVault>(() => defaultWealthVault());
   const [donations, setDonations] = useState<DonationEntry[]>([]);
@@ -244,12 +246,30 @@ const GrowthDashboardSections: React.FC<GrowthDashboardSectionsProps> = ({
   const [donAmount, setDonAmount] = useState('');
   const [donNote, setDonNote] = useState('');
 
+  const wishlistSectionRef = useRef<HTMLElement | null>(null);
+  const wlNameInputRef = useRef<HTMLInputElement | null>(null);
+  const zakatScrollRef = useRef<HTMLDivElement | null>(null);
+
   const zakatTagged = useRef(false);
   useEffect(() => {
-    if (!uid || !vaultUnlocked || zakatTagged.current) return;
+    if (!uid || zakatTagged.current) return;
     zakatTagged.current = true;
     void mergeGrowthMarketingTags(uid, ['Zakat Calculator User']);
-  }, [uid, vaultUnlocked]);
+  }, [uid]);
+
+  useEffect(() => {
+    if (!wishlistFocusSignal) return;
+    wishlistSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const t = window.setTimeout(() => {
+      wlNameInputRef.current?.focus({ preventScroll: true });
+    }, 450);
+    return () => window.clearTimeout(t);
+  }, [wishlistFocusSignal]);
+
+  useEffect(() => {
+    if (!zakatFocusSignal) return;
+    zakatScrollRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [zakatFocusSignal]);
 
   useEffect(() => {
     if (!userProfile) return;
@@ -313,17 +333,15 @@ const GrowthDashboardSections: React.FC<GrowthDashboardSectionsProps> = ({
           wealthVaultUpdatedAt: serverTimestamp(),
         });
         await syncUserWealthDocument(uid, next, appCashBalanceBdt);
-        if (vaultUnlocked) {
-          await mergeGrowthMarketingTags(uid, ['Wealth Vault User', 'Net Worth Tracker']);
-          await mergeMarketingTagsFromTexts(uid, [
-            `gold ${next.goldBhori} bhori ${next.goldGram} gram fd ${next.savingsFdBdt} property ${next.realEstateBdt}`,
-          ]);
-        }
+        await mergeGrowthMarketingTags(uid, ['Wealth Vault User', 'Net Worth Tracker']);
+        await mergeMarketingTagsFromTexts(uid, [
+          `gold ${next.goldBhori} bhori ${next.goldGram} gram fd ${next.savingsFdBdt} property ${next.realEstateBdt}`,
+        ]);
       } catch (e) {
         console.warn('vault save:', e);
       }
     },
-    [uid, vaultUnlocked],
+    [uid],
   );
 
   const persistDonations = useCallback(
@@ -401,6 +419,8 @@ const GrowthDashboardSections: React.FC<GrowthDashboardSectionsProps> = ({
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Smart wishlist — Dream board */}
         <motion.section
+          ref={wishlistSectionRef}
+          id="dashboard-wishlist-section"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           className={cardShell('p-5 sm:p-6')}
@@ -460,6 +480,7 @@ const GrowthDashboardSections: React.FC<GrowthDashboardSectionsProps> = ({
 
           <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
             <input
+              ref={wlNameInputRef}
               placeholder={language === 'bn' ? 'স্বপ্ন / আইটেমের নাম' : 'Dream / item name'}
               value={wlName}
               onChange={(e) => {
@@ -581,7 +602,7 @@ const GrowthDashboardSections: React.FC<GrowthDashboardSectionsProps> = ({
           </p>
         </motion.section>
 
-        {/* Wealth vault — Premium / Ramadan gate + admin intelligence sync */}
+        {/* Wealth vault + Zakat (open for everyone) */}
         <motion.section
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -591,45 +612,21 @@ const GrowthDashboardSections: React.FC<GrowthDashboardSectionsProps> = ({
 
           <div className="relative flex flex-col items-center gap-4 sm:flex-row sm:items-start sm:gap-6">
             <div className="relative mx-auto w-full max-w-[6.5rem] shrink-0 sm:mx-0 sm:w-auto sm:max-w-none">
-              <div className="absolute -right-0.5 top-0 z-20 sm:-right-1">
-                <motion.span
-                  className="inline-block origin-top-right cursor-default select-none rounded-sm bg-gradient-to-r from-amber-500 to-amber-600 px-2 py-0.5 text-[8px] font-black uppercase tracking-widest text-white shadow-lg shadow-amber-500/50 ring-2 ring-amber-300/60 min-[400px]:px-3 min-[400px]:py-1 min-[400px]:text-[9px]"
-                  initial={false}
-                  animate={{ rotate: 12, y: 0, scale: 1 }}
-                  whileHover={{
-                    y: -8,
-                    rotate: 20,
-                    scale: 1.08,
-                    transition: { type: 'spring', stiffness: 420, damping: 16 },
-                  }}
-                  whileTap={{ scale: 0.96 }}
-                >
-                  Premium
-                </motion.span>
-              </div>
               <motion.div
                 className="relative flex h-28 w-24 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-600 via-slate-800 to-slate-950 shadow-[0_20px_40px_rgba(0,0,0,0.45),inset_0_2px_0_rgba(255,255,255,0.12),inset_0_-8px_24px_rgba(0,0,0,0.5)] ring-2 ring-cyan-400/30 dark:from-slate-800 dark:via-slate-950 dark:to-black dark:ring-cyan-500/25"
                 style={{ transformStyle: 'preserve-3d' }}
                 animate={{
-                  rotateY: vaultUnlocked ? [-6, 6, -6] : 0,
-                  rotateX: vaultUnlocked ? [4, 8, 4] : 6,
+                  rotateY: [-6, 6, -6],
+                  rotateX: [4, 8, 4],
                 }}
-                transition={
-                  vaultUnlocked
-                    ? { duration: 6, repeat: Infinity, ease: 'easeInOut' }
-                    : { duration: 0.3 }
-                }
+                transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
                 aria-hidden
               >
                 <div
                   className="absolute inset-1 rounded-xl border border-white/10 bg-black/20"
                   style={{ transform: 'translateZ(8px)' }}
                 />
-                {vaultUnlocked ? (
-                  <Box className="relative z-10 h-11 w-11 text-cyan-300 drop-shadow-[0_0_12px_rgba(34,211,238,0.6)]" strokeWidth={2} />
-                ) : (
-                  <Lock className="relative z-10 h-11 w-11 text-slate-400 drop-shadow-md" strokeWidth={2} />
-                )}
+                <Box className="relative z-10 h-11 w-11 text-cyan-300 drop-shadow-[0_0_12px_rgba(34,211,238,0.6)]" strokeWidth={2} />
               </motion.div>
             </div>
 
@@ -639,30 +636,15 @@ const GrowthDashboardSections: React.FC<GrowthDashboardSectionsProps> = ({
                 {language === 'bn' ? 'ওয়েলথ ভল্ট' : 'Wealth vault'}
               </h3>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                {vaultUnlocked
-                  ? language === 'bn'
-                    ? userProfile?.isPremium
-                      ? 'প্রিমিয়াম সক্রিয় — সম্পদ ও জাকাত ট্র্যাকিং আনলক।'
-                      : 'রমজান উপলক্ষে আনলক — সম্পদ ও জাকাত ট্র্যাকিং।'
-                    : userProfile?.isPremium
-                      ? 'Premium active — wealth & Zakat tracking unlocked.'
-                      : 'Unlocked for Ramadan — wealth & Zakat tracking.'
-                  : language === 'bn'
-                    ? 'প্রিমিয়াম বা রমজানে পূর্ণ অ্যাক্সেস।'
-                    : 'Full access with Premium or during Ramadan.'}
+                {language === 'bn'
+                  ? 'সম্পদ ট্র্যাক করুন এবং নগদ + ভল্টের ভিত্তিতে প্রত্যাশিত জাকাত দেখুন।'
+                  : 'Track assets and view estimated Zakat from cash plus your vault.'}
               </p>
             </div>
           </div>
 
-          {!vaultUnlocked ? (
-            <div className="relative mt-6 rounded-2xl border border-slate-300/60 bg-slate-100/80 p-5 text-center backdrop-blur-md dark:border-slate-600 dark:bg-slate-900/60">
-              <Lock className="mx-auto mb-3 h-10 w-10 text-slate-400" />
-              <p className="text-sm font-bold leading-relaxed text-slate-700 dark:text-slate-200">
-                আপনার সম্পদ ও জাকাত অটো-ক্যালকুলেট করতে প্রিমিয়াম নিন। (রমজানে এটি সবার জন্য ফ্রি!)
-              </p>
-            </div>
-          ) : (
-            <>
+          <>
+            <div ref={zakatScrollRef} id="dashboard-zakat-anchor" className="scroll-mt-24">
               <motion.div
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -688,6 +670,7 @@ const GrowthDashboardSections: React.FC<GrowthDashboardSectionsProps> = ({
                     : `App cash (all-time): ${formatCurrency(Math.max(0, cashAllTime), language)} · 2.5% on zakatable vault + cash (electronics excluded).`}
                 </p>
               </motion.div>
+            </div>
 
               <div className="relative mt-5 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
                 <label className="col-span-1 space-y-1">
@@ -803,8 +786,7 @@ const GrowthDashboardSections: React.FC<GrowthDashboardSectionsProps> = ({
                   </ResponsiveContainer>
                 )}
               </div>
-            </>
-          )}
+          </>
         </motion.section>
       </div>
 

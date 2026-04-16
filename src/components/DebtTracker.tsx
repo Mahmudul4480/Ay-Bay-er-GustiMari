@@ -17,12 +17,30 @@ import {
 } from '../lib/financialNetworkSync';
 import { mergeMarketingTagsFromTexts } from '../lib/marketingTagsSync';
 
-const DebtTracker: React.FC = () => {
+/** Primary action: 3D neomorphism + blue neon rim (debt modals footer). */
+const debtModalSaveButtonClass = cn(
+  'flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 font-bold text-white transition-all active:scale-[0.98] disabled:opacity-60 sm:py-4',
+  'bg-gradient-to-b from-blue-500 to-blue-700 dark:from-blue-600 dark:to-blue-900',
+  'border border-blue-300/65 dark:border-blue-400/35',
+  'shadow-[inset_0_2px_4px_rgba(255,255,255,0.4),inset_0_-3px_8px_rgba(0,0,0,0.18),0_4px_0_rgb(29,78,216),0_0_28px_rgba(59,130,246,0.55),0_10px_28px_rgba(37,99,235,0.3)]',
+  'dark:shadow-[inset_0_2px_4px_rgba(255,255,255,0.12),inset_0_-4px_10px_rgba(0,0,0,0.45),0_4px_0_rgb(30,58,138),0_0_34px_rgba(59,130,246,0.5)]',
+);
+
+export interface DebtTrackerProps {
+  /** Increment to open the “add debt” modal from outside (e.g. dashboard speed dial). */
+  openAddModalSignal?: number;
+}
+
+const DebtTracker: React.FC<DebtTrackerProps> = ({ openAddModalSignal = 0 }) => {
   const { debts = [] } = useTransactions();
   const { t, language } = useLocalization();
   const { user } = useAuth();
   const { celebrate } = useTransactionFeedback();
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  React.useEffect(() => {
+    if (openAddModalSignal > 0) setIsModalOpen(true);
+  }, [openAddModalSignal]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<'all' | 'paid' | 'unpaid'>('all');
@@ -628,150 +646,162 @@ const DebtTracker: React.FC = () => {
 
       <AnimatePresence>
         {isModalOpen && (
-          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="fixed inset-0 z-50 flex min-h-0 items-center justify-center overflow-y-auto overscroll-y-contain bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="bg-white dark:bg-slate-800 w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden transition-colors"
+              className="my-auto flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-3xl bg-white shadow-2xl transition-colors dark:bg-slate-800"
             >
-              <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
-                <h2 className="text-2xl font-bold text-slate-800 dark:text-white">{t('addTransaction')}</h2>
-                <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-full text-slate-400">
-                  <X className="w-6 h-6" />
+              <div className="flex shrink-0 items-center justify-between border-b border-slate-100 p-4 dark:border-slate-700 sm:p-6">
+                <h2 className="text-xl font-bold text-slate-800 dark:text-white sm:text-2xl">{t('addTransaction')}</h2>
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="rounded-full p-2 text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700"
+                >
+                  <X className="h-6 w-6" />
                 </button>
               </div>
 
-              {error && (
-                <div className="mx-8 mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 rounded-2xl flex items-center gap-3 text-red-600 dark:text-red-400 text-sm">
-                  <AlertTriangle className="w-5 h-5 flex-shrink-0" />
-                  <p className="font-medium">{error}</p>
-                </div>
-              )}
-
-              <form onSubmit={handleSubmit} className="p-8 space-y-6">
-                <div className="flex p-1 bg-slate-100 dark:bg-slate-700 rounded-2xl">
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, type: 'lent' })}
-                    className={cn(
-                      "flex-1 py-3 rounded-xl font-semibold transition-all",
-                      formData.type === 'lent' ? "bg-white dark:bg-slate-600 text-green-600 dark:text-green-400 shadow-sm" : "text-slate-500 dark:text-slate-400"
-                    )}
-                  >
-                    {t('lent')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, type: 'borrowed' })}
-                    className={cn(
-                      "flex-1 py-3 rounded-xl font-semibold transition-all",
-                      formData.type === 'borrowed' ? "bg-white dark:bg-slate-600 text-red-600 dark:text-red-400 shadow-sm" : "text-slate-500 dark:text-slate-400"
-                    )}
-                  >
-                    {t('borrowed')}
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('personName')}</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.personName}
-                      onChange={(e) => setFormData({ ...formData, personName: e.target.value })}
-                      className="w-full p-4 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none dark:text-white"
-                    />
+              <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                {error && (
+                  <div className="mx-4 mt-3 flex shrink-0 items-center gap-3 rounded-2xl border border-red-100 bg-red-50 p-3 text-sm text-red-600 dark:border-red-900/30 dark:bg-red-900/20 dark:text-red-400 sm:mx-8 sm:mt-4 sm:p-4">
+                    <AlertTriangle className="h-5 w-5 shrink-0" />
+                    <p className="font-medium">{error}</p>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('phoneNumber')} *</label>
-                    <input
-                      type="tel"
-                      required
-                      autoComplete="tel"
-                      value={formData.phoneNumber}
-                      onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
-                      className="w-full p-4 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none dark:text-white"
-                    />
-                    <p className="text-xs text-slate-400">Minimum 10 digits</p>
-                  </div>
-                </div>
+                )}
 
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-600 dark:bg-slate-800/50">
-                  <input
-                    id="add-debt-is-business"
-                    type="checkbox"
-                    checked={formData.isBusiness}
-                    onChange={(e) => setFormData({ ...formData, isBusiness: e.target.checked })}
-                    className="peer sr-only"
-                  />
-                  <label htmlFor="add-debt-is-business" className="flex cursor-pointer items-start gap-3">
-                    <span
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-20 pt-4 space-y-3 [-webkit-overflow-scrolling:touch] sm:space-y-6 sm:px-8 sm:pt-5">
+                  <div className="flex rounded-2xl bg-slate-100 p-1 dark:bg-slate-700">
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, type: 'lent' })}
                       className={cn(
-                        'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500',
-                        formData.isBusiness
-                          ? 'border-blue-600 bg-blue-600 text-white'
-                          : 'border-slate-300 bg-white dark:border-slate-500 dark:bg-slate-700',
+                        'flex-1 rounded-xl py-3 font-semibold transition-all',
+                        formData.type === 'lent'
+                          ? 'bg-white text-green-600 shadow-sm dark:bg-slate-600 dark:text-green-400'
+                          : 'text-slate-500 dark:text-slate-400',
                       )}
                     >
-                      {formData.isBusiness ? '✓' : ''}
-                    </span>
-                    <span className="text-sm text-slate-700 dark:text-slate-200">
-                      <span className="font-semibold">Business / shop / agency</span>
-                      <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
-                        Check if money is owed to or from a company, store, or agent (not only an individual). Used for lead scoring.
+                      {t('lent')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, type: 'borrowed' })}
+                      className={cn(
+                        'flex-1 rounded-xl py-3 font-semibold transition-all',
+                        formData.type === 'borrowed'
+                          ? 'bg-white text-red-600 shadow-sm dark:bg-slate-600 dark:text-red-400'
+                          : 'text-slate-500 dark:text-slate-400',
+                      )}
+                    >
+                      {t('borrowed')}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-6">
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('personName')}</label>
+                      <input
+                        type="text"
+                        required
+                        value={formData.personName}
+                        onChange={(e) => setFormData({ ...formData, personName: e.target.value })}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('phoneNumber')} *</label>
+                      <input
+                        type="tel"
+                        required
+                        autoComplete="tel"
+                        value={formData.phoneNumber}
+                        onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                      />
+                      <p className="text-xs text-slate-400">Minimum 10 digits</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-600 dark:bg-slate-800/50">
+                    <input
+                      id="add-debt-is-business"
+                      type="checkbox"
+                      checked={formData.isBusiness}
+                      onChange={(e) => setFormData({ ...formData, isBusiness: e.target.checked })}
+                      className="peer sr-only"
+                    />
+                    <label htmlFor="add-debt-is-business" className="flex cursor-pointer items-start gap-3">
+                      <span
+                        className={cn(
+                          'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500',
+                          formData.isBusiness
+                            ? 'border-blue-600 bg-blue-600 text-white'
+                            : 'border-slate-300 bg-white dark:border-slate-500 dark:bg-slate-700',
+                        )}
+                      >
+                        {formData.isBusiness ? '✓' : ''}
                       </span>
-                    </span>
-                  </label>
-                </div>
+                      <span className="text-sm text-slate-700 dark:text-slate-200">
+                        <span className="font-semibold">Business / shop / agency</span>
+                        <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                          Check if money is owed to or from a company, store, or agent (not only an individual). Used for lead scoring.
+                        </span>
+                      </span>
+                    </label>
+                  </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-6">
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('amount')}</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        required
+                        value={formData.amount}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const sanitized = sanitizeDecimal(val);
+                          console.log('Debt Amount Input:', { val, sanitized });
+                          setFormData({ ...formData, amount: sanitized });
+                        }}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('dueDate')}</label>
+                      <input
+                        type="date"
+                        required
+                        value={formData.dueDate}
+                        onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                      />
+                    </div>
+                  </div>
+
                   <div className="space-y-2">
-                    <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('amount')}</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      required
-                      value={formData.amount}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        const sanitized = sanitizeDecimal(val);
-                        console.log('Debt Amount Input:', { val, sanitized });
-                        setFormData({ ...formData, amount: sanitized });
-                      }}
-                      className="w-full p-4 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none dark:text-white"
+                    <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('note')}</label>
+                    <textarea
+                      value={formData.description}
+                      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                      className="h-24 w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 p-4 outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
                     />
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('dueDate')}</label>
-                    <input
-                      type="date"
-                      required
-                      value={formData.dueDate}
-                      onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
-                      className="w-full p-4 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none dark:text-white"
-                    />
-                  </div>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-600 dark:text-slate-400">{t('note')}</label>
-                  <textarea
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none h-24 resize-none dark:text-white"
-                  />
+                <div className="sticky bottom-0 z-10 shrink-0 border-t border-slate-100 bg-white/95 p-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md dark:border-slate-700 dark:bg-slate-800/95 sm:p-4">
+                  <button type="submit" disabled={isSubmitting} className={debtModalSaveButtonClass}>
+                    {isSubmitting ? (
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    ) : (
+                      <Save className="h-5 w-5" />
+                    )}
+                    {t('save')}
+                  </button>
                 </div>
-
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full py-4 px-6 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none active:scale-95 flex items-center justify-center gap-2"
-                >
-                  {isSubmitting ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Save className="w-5 h-5" />}
-                  {t('save')}
-                </button>
               </form>
             </motion.div>
           </div>
@@ -815,7 +845,7 @@ const DebtTracker: React.FC = () => {
       {/* ── Edit Debt Modal ───────────────────────────────────────────────────── */}
       <AnimatePresence>
         {editingDebt && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[70] flex min-h-0 items-center justify-center overflow-y-auto overscroll-y-contain p-3 sm:p-4">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -827,146 +857,147 @@ const DebtTracker: React.FC = () => {
               initial={{ opacity: 0, scale: 0.9, y: 24 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 24 }}
-              className="relative w-full max-w-lg overflow-hidden rounded-[2rem] shadow-2xl"
+              className="relative my-auto flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-[2rem] shadow-2xl"
               style={{
                 background: 'linear-gradient(145deg, rgba(255,255,255,0.97) 0%, rgba(248,250,252,0.97) 100%)',
                 boxShadow: '0 32px 80px -10px rgba(15,23,42,0.25), inset 0 1px 0 rgba(255,255,255,0.8)',
               }}
             >
               {/* Gradient header */}
-              <div className="flex items-center justify-between bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-white">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20 backdrop-blur-sm">
+              <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-blue-600 to-indigo-600 p-4 text-white sm:p-6">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/20 backdrop-blur-sm">
                     <Edit2 className="h-5 w-5" />
                   </div>
-                  <div>
-                    <h2 className="text-xl font-black">Edit Debt Entry</h2>
+                  <div className="min-w-0">
+                    <h2 className="text-lg font-black sm:text-xl">Edit Debt Entry</h2>
                     <p className="text-xs text-blue-100">Changes recalculate balance in real-time</p>
                   </div>
                 </div>
                 <button
+                  type="button"
                   onClick={() => !isEditSubmitting && setEditingDebt(null)}
-                  className="rounded-full p-2 hover:bg-white/15 transition-colors"
+                  className="shrink-0 rounded-full p-2 transition-colors hover:bg-white/15"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
 
-              {editError && (
-                <div className="mx-6 mt-5 flex items-center gap-3 rounded-2xl border border-red-100 bg-red-50 p-4 text-sm text-red-600 dark:border-red-900/30 dark:bg-red-900/20 dark:text-red-400">
-                  <AlertTriangle className="h-5 w-5 shrink-0" />
-                  <p className="font-medium">{editError}</p>
-                </div>
-              )}
+              <form onSubmit={handleEditSubmit} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                {editError && (
+                  <div className="mx-4 mt-3 flex shrink-0 items-center gap-3 rounded-2xl border border-red-100 bg-red-50 p-3 text-sm text-red-600 dark:border-red-900/30 dark:bg-red-900/20 dark:text-red-400 sm:mx-6 sm:mt-4 sm:p-4">
+                    <AlertTriangle className="h-5 w-5 shrink-0" />
+                    <p className="font-medium">{editError}</p>
+                  </div>
+                )}
 
-              <form onSubmit={handleEditSubmit} className="space-y-5 p-6">
-                {/* Type toggle */}
-                <div className="flex rounded-2xl bg-slate-100 p-1 dark:bg-slate-700">
-                  {(['lent', 'borrowed'] as const).map((tp) => (
-                    <button
-                      key={tp}
-                      type="button"
-                      onClick={() => setEditFormData((p) => ({ ...p, type: tp }))}
-                      className={cn(
-                        'flex-1 rounded-xl py-3 text-sm font-bold transition-all',
-                        editFormData.type === tp
-                          ? tp === 'lent'
-                            ? 'bg-white text-green-600 shadow-sm dark:bg-slate-600 dark:text-green-400'
-                            : 'bg-white text-red-600 shadow-sm dark:bg-slate-600 dark:text-red-400'
-                          : 'text-slate-500 dark:text-slate-400'
-                      )}
-                    >
-                      {tp === 'lent' ? t('lent') : t('borrowed')}
-                    </button>
-                  ))}
-                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-20 pt-4 space-y-3 [-webkit-overflow-scrolling:touch] sm:space-y-5 sm:px-6 sm:pt-5">
+                  {/* Type toggle */}
+                  <div className="flex rounded-2xl bg-slate-100 p-1 dark:bg-slate-700">
+                    {(['lent', 'borrowed'] as const).map((tp) => (
+                      <button
+                        key={tp}
+                        type="button"
+                        onClick={() => setEditFormData((p) => ({ ...p, type: tp }))}
+                        className={cn(
+                          'flex-1 rounded-xl py-3 text-sm font-bold transition-all',
+                          editFormData.type === tp
+                            ? tp === 'lent'
+                              ? 'bg-white text-green-600 shadow-sm dark:bg-slate-600 dark:text-green-400'
+                              : 'bg-white text-red-600 shadow-sm dark:bg-slate-600 dark:text-red-400'
+                            : 'text-slate-500 dark:text-slate-400',
+                        )}
+                      >
+                        {tp === 'lent' ? t('lent') : t('borrowed')}
+                      </button>
+                    ))}
+                  </div>
 
-                {/* Name + Phone */}
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold uppercase tracking-wide text-slate-500">{t('personName')}</label>
+                  {/* Name + Phone */}
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold uppercase tracking-wide text-slate-500">{t('personName')}</label>
+                      <input
+                        type="text"
+                        required
+                        value={editFormData.personName}
+                        onChange={(e) => setEditFormData((p) => ({ ...p, personName: e.target.value }))}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold uppercase tracking-wide text-slate-500">{t('phoneNumber')} *</label>
+                      <input
+                        type="tel"
+                        required
+                        value={editFormData.phoneNumber}
+                        onChange={(e) => setEditFormData((p) => ({ ...p, phoneNumber: e.target.value }))}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                      />
+                    </div>
+                  </div>
+
+                  <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-600 dark:bg-slate-800/50">
                     <input
-                      type="text"
-                      required
-                      value={editFormData.personName}
-                      onChange={(e) => setEditFormData((p) => ({ ...p, personName: e.target.value }))}
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                      type="checkbox"
+                      checked={editFormData.isBusiness}
+                      onChange={(e) => setEditFormData((p) => ({ ...p, isBusiness: e.target.checked }))}
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">Business / shop / agency counterparty</span>
+                  </label>
+
+                  {/* Amount + Due Date */}
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold uppercase tracking-wide text-slate-500">{t('amount')}</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        required
+                        value={editFormData.amount}
+                        onChange={(e) => {
+                          const v = sanitizeDecimal(e.target.value);
+                          // Block leading minus signs
+                          if (!v.startsWith('-')) setEditFormData((p) => ({ ...p, amount: v }));
+                        }}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold uppercase tracking-wide text-slate-500">{t('dueDate')}</label>
+                      <input
+                        type="date"
+                        required
+                        value={editFormData.dueDate}
+                        onChange={(e) => setEditFormData((p) => ({ ...p, dueDate: e.target.value }))}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Note */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase tracking-wide text-slate-500">{t('note')}</label>
+                    <textarea
+                      value={editFormData.description}
+                      onChange={(e) => setEditFormData((p) => ({ ...p, description: e.target.value }))}
+                      rows={3}
+                      className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
                     />
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold uppercase tracking-wide text-slate-500">{t('phoneNumber')} *</label>
-                    <input
-                      type="tel"
-                      required
-                      value={editFormData.phoneNumber}
-                      onChange={(e) => setEditFormData((p) => ({ ...p, phoneNumber: e.target.value }))}
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
-                    />
-                  </div>
                 </div>
 
-                <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-600 dark:bg-slate-800/50">
-                  <input
-                    type="checkbox"
-                    checked={editFormData.isBusiness}
-                    onChange={(e) => setEditFormData((p) => ({ ...p, isBusiness: e.target.checked }))}
-                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">Business / shop / agency counterparty</span>
-                </label>
-
-                {/* Amount + Due Date */}
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold uppercase tracking-wide text-slate-500">{t('amount')}</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      required
-                      value={editFormData.amount}
-                      onChange={(e) => {
-                        const v = sanitizeDecimal(e.target.value);
-                        // Block leading minus signs
-                        if (!v.startsWith('-')) setEditFormData((p) => ({ ...p, amount: v }));
-                      }}
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold uppercase tracking-wide text-slate-500">{t('dueDate')}</label>
-                    <input
-                      type="date"
-                      required
-                      value={editFormData.dueDate}
-                      onChange={(e) => setEditFormData((p) => ({ ...p, dueDate: e.target.value }))}
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
-                    />
-                  </div>
+                <div className="sticky bottom-0 z-10 shrink-0 border-t border-slate-200/80 bg-white/95 p-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md sm:p-4">
+                  <button type="submit" disabled={isEditSubmitting} className={debtModalSaveButtonClass}>
+                    {isEditSubmitting ? (
+                      <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    ) : (
+                      <CheckCircle className="h-5 w-5" />
+                    )}
+                    {t('save')}
+                  </button>
                 </div>
-
-                {/* Note */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold uppercase tracking-wide text-slate-500">{t('note')}</label>
-                  <textarea
-                    value={editFormData.description}
-                    onChange={(e) => setEditFormData((p) => ({ ...p, description: e.target.value }))}
-                    rows={3}
-                    className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={isEditSubmitting}
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 py-4 font-bold text-white shadow-lg shadow-blue-500/25 transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-60"
-                >
-                  {isEditSubmitting ? (
-                    <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  ) : (
-                    <CheckCircle className="h-5 w-5" />
-                  )}
-                  Save Changes
-                </button>
               </form>
             </motion.div>
           </div>

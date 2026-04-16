@@ -5,7 +5,7 @@ import { TransactionFeedbackProvider } from './contexts/TransactionFeedbackConte
 import { TransactionsProvider } from './hooks/useTransactions';
 import { MonthSelectionProvider } from './contexts/MonthSelectionContext';
 import { loginWithGoogle, logout, isInAppBrowser, isConfigValid } from './firebaseConfig';
-import { LogOut, LayoutDashboard, CreditCard, Settings, Plus, Menu, X, Sun, Moon, AlertTriangle, ArrowLeft, Home, BookOpen, Lightbulb, Users, BarChart3 } from 'lucide-react';
+import { LogOut, LayoutDashboard, CreditCard, Settings, Menu, X, Sun, Moon, AlertTriangle, ArrowLeft, Home, BookOpen, Lightbulb, Users, BarChart3 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 import Dashboard from './pages/Dashboard';
@@ -26,6 +26,7 @@ import { useWelcomeBack } from './hooks/useWelcomeBack';
 import NotificationBar from './components/NotificationBar';
 import { usePeerBenchmarkInsight, peerSidebarSubtitle } from './hooks/usePeerBenchmarkInsight';
 import { usePWA } from './hooks/usePWA';
+import DashboardSpeedDial, { type SpeedDialAction } from './components/DashboardSpeedDial';
 
 const ADMIN_EMAIL = 'chotan4480@gmail.com';
 const FORCE_RELOGIN_NOTICE_KEY = 'force-relogin-notice';
@@ -89,7 +90,11 @@ const AppContent: React.FC = () => {
 
   // ── All hooks must be declared before any conditional return ──
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
-  const [isAddModalOpen, setIsAddModalOpen] = React.useState(false);
+  const [speedDialOpen, setSpeedDialOpen] = React.useState(false);
+  const [transactionModal, setTransactionModal] = React.useState<null | { type: 'income' | 'expense' }>(null);
+  const [debtAddSignal, setDebtAddSignal] = React.useState(0);
+  const [wishlistFocusSignal, setWishlistFocusSignal] = React.useState(0);
+  const [zakatFocusSignal, setZakatFocusSignal] = React.useState(0);
   const [isDarkMode, setIsDarkMode] = React.useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('theme') === 'dark' || 
@@ -110,6 +115,37 @@ const AppContent: React.FC = () => {
     setActiveTab('dashboard');
     setIsSidebarOpen(false);
   }, []);
+
+  const handleSpeedDialPick = React.useCallback((action: SpeedDialAction) => {
+    setSpeedDialOpen(false);
+    switch (action) {
+      case 'income':
+        setTransactionModal({ type: 'income' });
+        break;
+      case 'expense':
+        setTransactionModal({ type: 'expense' });
+        break;
+      case 'debt':
+        setActiveTab('debts');
+        setDebtAddSignal((n) => n + 1);
+        break;
+      case 'wishlist':
+        setActiveTab('dashboard');
+        setWishlistFocusSignal((n) => n + 1);
+        break;
+      case 'zakat':
+        setActiveTab('dashboard');
+        setZakatFocusSignal((n) => n + 1);
+        break;
+      default:
+        break;
+    }
+  }, []);
+
+  const showSpeedDial =
+    activeTab !== 'admin' &&
+    activeTab !== 'blogcreator' &&
+    (isMdUp || !isSidebarOpen);
 
   React.useEffect(() => {
     const mq = window.matchMedia('(min-width: 768px)');
@@ -655,10 +691,15 @@ const AppContent: React.FC = () => {
         {/* Main Content */}
         <main className="mx-auto w-full min-w-0 max-w-7xl flex-1 overflow-x-hidden p-3 pb-24 sm:p-4 md:p-8 md:pb-8">
           {activeTab === 'dashboard' && (
-            <Dashboard onTabChange={setActiveTab} pwaInstall={pwaInstall} />
+            <Dashboard
+              onTabChange={setActiveTab}
+              pwaInstall={pwaInstall}
+              wishlistFocusSignal={wishlistFocusSignal}
+              zakatFocusSignal={zakatFocusSignal}
+            />
           )}
         {activeTab === 'transactions' && <TransactionList />}
-        {activeTab === 'debts' && <DebtTracker />}
+        {activeTab === 'debts' && <DebtTracker openAddModalSignal={debtAddSignal} />}
         {activeTab === 'smarttips' && <SmartTipsList onBack={() => setActiveTab('dashboard')} />}
         {activeTab === 'settings' && <SettingsPage />}
         {activeTab === 'admin' && isAdminUser && <AdminDashboard onBack={() => setActiveTab('dashboard')} />}
@@ -671,21 +712,21 @@ const AppContent: React.FC = () => {
         </main>
       </div>{/* end desktop main wrapper */}
 
-      {/* Floating Add Button */}
-      <motion.button
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        onClick={() => setIsAddModalOpen(true)}
-        className="fixed bottom-4 right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg sm:bottom-8 sm:right-8 sm:h-16 sm:w-16"
-        aria-label="Add transaction"
-      >
-        <Plus className="h-7 w-7 sm:h-8 sm:w-8" />
-      </motion.button>
+      {showSpeedDial && (
+        <DashboardSpeedDial
+          language={language === 'bn' ? 'bn' : 'en'}
+          open={speedDialOpen}
+          onOpenChange={setSpeedDialOpen}
+          onPick={handleSpeedDialPick}
+        />
+      )}
 
-      {/* Add Transaction Modal */}
       <AnimatePresence>
-        {isAddModalOpen && (
-          <TransactionForm onClose={() => setIsAddModalOpen(false)} />
+        {transactionModal && (
+          <TransactionForm
+            initialType={transactionModal.type}
+            onClose={() => setTransactionModal(null)}
+          />
         )}
       </AnimatePresence>
     </div>

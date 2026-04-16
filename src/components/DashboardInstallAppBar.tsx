@@ -2,8 +2,9 @@
  * Permanent dashboard strip — install / add-to-home (replaces floating PWA banner).
  */
 
+import React from 'react';
 import { motion } from 'motion/react';
-import { Download, RefreshCw, Share2, Smartphone } from 'lucide-react';
+import { Check, Copy, Download, RefreshCw, Smartphone } from 'lucide-react';
 import { isInAppBrowser } from '../firebaseConfig';
 import type { UsePWAReturn } from '../hooks/usePWA';
 import { cn } from '../lib/utils';
@@ -30,26 +31,26 @@ export default function DashboardInstallAppBar({ language, pwa }: DashboardInsta
   if (!show) return null;
 
   const bn = language === 'bn';
+  const [iosLinkCopied, setIosLinkCopied] = React.useState(false);
 
   const desktopManualHint =
     !isInstallable && !showIOSInstallGuide && !showMobileManualInstall;
 
-  const canWebShare =
-    typeof navigator !== 'undefined' && typeof navigator.share === 'function';
-
   const showReloadForPrompt =
     !isInstallable && !showIOSInstallGuide && (desktopManualHint || showMobileManualInstall);
 
-  const openIOSShare = () => {
-    if (!canWebShare) return;
-    void navigator
-      .share({
-        title: typeof document !== 'undefined' ? document.title : '',
-        url: typeof window !== 'undefined' ? window.location.href : '',
-      })
-      .catch(() => {
-        /* user cancelled */
-      });
+  const copySiteLink = () => {
+    const url = typeof window !== 'undefined' ? window.location.href : '';
+    if (!url) return;
+    void (async () => {
+      try {
+        await navigator.clipboard.writeText(url);
+        setIosLinkCopied(true);
+        window.setTimeout(() => setIosLinkCopied(false), 2200);
+      } catch {
+        /* clipboard denied */
+      }
+    })();
   };
 
   return (
@@ -63,7 +64,15 @@ export default function DashboardInstallAppBar({ language, pwa }: DashboardInsta
         'shadow-[0_0_32px_rgba(99,102,241,0.35),inset_0_1px_0_rgba(255,255,255,0.08)]',
         'dark:border-violet-500/30 dark:from-indigo-950 dark:via-violet-950 dark:to-slate-950'
       )}
-      aria-label={bn ? 'মোবাইল অ্যাপ ইনস্টল' : 'Install mobile app'}
+      aria-label={
+        showIOSInstallGuide
+          ? bn
+            ? 'iPhone — হোম স্ক্রিনে যোগ করুন'
+            : 'Add to Home Screen on iPhone'
+          : bn
+            ? 'মোবাইল অ্যাপ ইনস্টল'
+            : 'Install mobile app'
+      }
     >
       <motion.div
         className="pointer-events-none absolute inset-0 bg-gradient-to-r from-transparent via-white/[0.07] to-transparent"
@@ -96,20 +105,47 @@ export default function DashboardInstallAppBar({ language, pwa }: DashboardInsta
           </motion.div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-black leading-tight text-white sm:text-base">
-              {bn ? 'মোবাইল অ্যাপ ইনস্টল করুন' : 'Install the mobile app'}
+              {showIOSInstallGuide
+                ? bn
+                  ? 'iPhone / iPad — হোম স্ক্রিনে যোগ করুন'
+                  : 'Add to Home Screen (iPhone & iPad)'
+                : bn
+                  ? 'মোবাইল অ্যাপ ইনস্টল করুন'
+                  : 'Install the mobile app'}
             </p>
-            <p className="mt-0.5 text-[11px] leading-snug text-indigo-100/85 sm:text-xs">
-              {showIOSInstallGuide ? (
-                <>
-                  <span className="inline-flex items-center gap-1 font-semibold text-white">
-                    <Share2 className="h-3 w-3 shrink-0 text-cyan-200" />
-                    Safari:
-                  </span>{' '}
+            {showIOSInstallGuide ? (
+              <div className="mt-2 space-y-2 text-[11px] leading-snug text-indigo-100/90 sm:text-xs">
+                <p className="font-semibold text-cyan-100/95">
                   {bn
-                    ? 'Share → Add to Home Screen। ক্রোম iOS-এ একই মেনু।'
-                    : 'Share → Add to Home Screen. Chrome on iOS: same menu.'}
-                </>
-              ) : showMobileManualInstall ? (
+                    ? 'Apple Safari তে ওয়েবসাইট থেকে সরাসরি “ইনস্টল” বাটন দেয় না — Safari-র নিচের মেনু ব্যবহার করতে হবে।'
+                    : 'Safari does not allow a site button to install like Chrome — use Safari’s own toolbar at the bottom.'}
+                </p>
+                <ol className="list-decimal space-y-1.5 pl-4 font-medium text-indigo-50/95 marker:text-cyan-200">
+                  <li>
+                    {bn
+                      ? 'Safari-র নিচের বারে তীরচিহ্নযুক্ত বর্গক্ষেত্র (Share) আইকনে ট্যাপ করুন — এটি এই পেজের কোনো বাটন নয়।'
+                      : 'Tap Share (⊼) in Safari’s bottom bar — not a button on this page.'}
+                  </li>
+                  <li>
+                    {bn
+                      ? 'তালিকায় স্ক্রল করে হোম স্ক্রিনে যোগ করুন / Add to Home Screen বেছে নিন।'
+                      : 'Scroll the actions and choose Add to Home Screen.'}
+                  </li>
+                  <li>
+                    {bn
+                      ? 'শিরোনাম ঠিক করে যোগ করুন ট্যাপ করুন।'
+                      : 'Tap Add to confirm.'}
+                  </li>
+                </ol>
+                <p className="text-[10px] text-indigo-200/75 sm:text-[11px]">
+                  {bn
+                    ? 'Chrome on iOS: একইভাবে ব্রাউজার মেনু → Add to Home Screen।'
+                    : 'Chrome on iOS: browser menu → Add to Home Screen (same idea).'}
+                </p>
+              </div>
+            ) : (
+            <p className="mt-0.5 text-[11px] leading-snug text-indigo-100/85 sm:text-xs">
+              {showMobileManualInstall ? (
                 <>
                   {bn
                     ? 'Chrome / Samsung Internet: মেনু (⋮) → Install app বা Add to Home screen।'
@@ -141,37 +177,35 @@ export default function DashboardInstallAppBar({ language, pwa }: DashboardInsta
                   : 'Install this site as an app from your browser menu.')
               )}
             </p>
+            )}
           </div>
         </div>
 
         {showIOSInstallGuide ? (
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
-            {canWebShare && (
-              <motion.button
-                type="button"
-                onClick={openIOSShare}
-                whileHover={{ scale: 1.03 }}
-                whileTap={{ scale: 0.97 }}
-                className={cn(
-                  'flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black text-white sm:w-auto',
-                  'bg-gradient-to-b from-cyan-400 via-indigo-500 to-violet-600',
-                  'shadow-[0_4px_0_rgb(79,70,229),0_10px_24px_rgba(99,102,241,0.45)]',
-                  'border border-white/25 active:translate-y-0.5'
-                )}
-              >
-                <Share2 className="h-4 w-4 shrink-0" strokeWidth={2.5} />
-                {bn ? 'শেয়ার মেনু খুলুন' : 'Open Share menu'}
-              </motion.button>
-            )}
-            {!canWebShare && (
-              <div
-                className={cn(
-                  'w-full rounded-xl border border-white/15 bg-white/10 px-4 py-2.5 text-center text-[11px] font-bold leading-snug text-indigo-50 sm:w-auto sm:max-w-[220px] sm:text-left'
-                )}
-              >
-                {bn ? 'উপরের ধাপ অনুসরণ করুন' : 'Follow the steps above'}
-              </div>
-            )}
+            <motion.button
+              type="button"
+              onClick={copySiteLink}
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
+              className={cn(
+                'flex w-full items-center justify-center gap-2 rounded-xl border border-white/25 bg-white/10 px-4 py-3 text-sm font-bold text-white sm:w-auto',
+                'shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
+              )}
+            >
+              {iosLinkCopied ? (
+                <Check className="h-4 w-4 shrink-0 text-emerald-300" strokeWidth={2.5} />
+              ) : (
+                <Copy className="h-4 w-4 shrink-0" strokeWidth={2.5} />
+              )}
+              {iosLinkCopied
+                ? bn
+                  ? 'কপি হয়েছে'
+                  : 'Copied'
+                : bn
+                  ? 'লিংক কপি করুন'
+                  : 'Copy link'}
+            </motion.button>
           </div>
         ) : (
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
