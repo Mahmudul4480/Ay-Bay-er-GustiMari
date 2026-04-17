@@ -132,6 +132,50 @@ export const translations: Translations = {
     en: 'Current month transactions were deleted.',
     bn: 'বর্তমান মাসের লেনদেন মুছে ফেলা হয়েছে।',
   },
+  transactionDrillDownTitle: {
+    en: 'Transaction drill-down',
+    bn: 'লেনদেন বিস্তারিত',
+  },
+  drillDownByCategory: {
+    en: 'Summary by category',
+    bn: 'বিভাগ অনুযায়ী সারাংশ',
+  },
+  drillDownBack: {
+    en: 'Back',
+    bn: 'পিছনে যান',
+  },
+  noteDescriptionLabel: {
+    en: 'Note / description',
+    bn: 'নোট/বিবরণ',
+  },
+  expenseForWhom: {
+    en: 'Spent for (family member)',
+    bn: 'কার জন্য খরচ হয়েছে',
+  },
+  uncategorized: {
+    en: 'Uncategorized',
+    bn: 'অনির্দিষ্ট বিভাগ',
+  },
+  drillDownEmpty: {
+    en: 'No entries for this month in this view.',
+    bn: 'এই মাসে এই ভিউতে কোনো লেনদেন নেই।',
+  },
+  recoveryStatusLabel: {
+    en: 'Recovery status',
+    bn: 'আদায়যোগ্যতা',
+  },
+  recoveryRecoverable: {
+    en: 'Recoverable (Zakat-eligible receivable)',
+    bn: 'যাকাতেযোগ্য পাওনা (আদায়যোগ্য)',
+  },
+  recoveryNonRecoverable: {
+    en: 'Non-recoverable',
+    bn: 'অনাদায়যোগ্য',
+  },
+  zakatNetDebitIntegrityBn: {
+    en: 'Please enter all receivables and payables in Net Debit so amounts auto-fill here.',
+    bn: 'দয়াকরে আপনার সকল পাওনা দেনা হিসাব নেট ডেবিটে এন্ট্রি দিন তাহলে এখানে অটো বসে যাবে',
+  },
 };
 
 interface LocalizationContextType {

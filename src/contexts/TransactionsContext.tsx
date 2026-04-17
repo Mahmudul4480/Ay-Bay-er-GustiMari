@@ -24,6 +24,8 @@ export interface Transaction {
   rolloverMonthKey?: string;
 }
 
+export type DebtRecoveryStatus = 'recoverable' | 'non_recoverable';
+
 export interface Debt {
   id: string;
   personName: string;
@@ -36,6 +38,11 @@ export interface Debt {
   userId: string;
   /** True when counterparty is shop / agency / business (not only an individual). */
   isBusiness?: boolean;
+  /**
+   * Net Debit / Zakat: receivable recoverability (যাকাতেযোগ্য পাওনা vs not).
+   * Missing on legacy docs → treated as recoverable in `useNetDebitData`.
+   */
+  recoveryStatus?: DebtRecoveryStatus;
 }
 
 export interface FixedFinance {

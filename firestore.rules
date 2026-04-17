@@ -88,11 +88,41 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function nonNegNumber(x) {
+      return x is number && x >= 0;
+    }
+
+    /** Wealth Vault Zakat worksheet — client merge writes */
+    function zakatCalculatorIsValid(data) {
+      return data.source == 'zakat_calculator'
+        && data.version is int && data.version == 1
+        && data.updatedAt is timestamp
+        && nonNegNumber(data.nisabBdt)
+        && nonNegNumber(data.cashInHandBdt)
+        && nonNegNumber(data.bankBalanceBdt)
+        && nonNegNumber(data.mobileBankingBdt)
+        && nonNegNumber(data.goldValueBdt)
+        && nonNegNumber(data.silverValueBdt)
+        && nonNegNumber(data.shopInventoryBdt)
+        && nonNegNumber(data.wholesaleRetailBdt)
+        && nonNegNumber(data.lentMoneyBdt)
+        && nonNegNumber(data.businessDuesBdt)
+        && nonNegNumber(data.shareMarketBdt)
+        && nonNegNumber(data.savingsCertificatesBdt)
+        && nonNegNumber(data.dpsFdrBdt)
+        && nonNegNumber(data.debtsBdt)
+        && nonNegNumber(data.totalWealthBdt)
+        && nonNegNumber(data.zakatDueBdt);
+    }
+
     // Wealth mirror for admin intelligence (user-owned snapshot under users/{uid}/wealth/*)
     match /users/{userId}/wealth/{docId} {
       allow read: if isOwner(userId) || isAdmin();
       allow create, update: if isOwner(userId)
-        && wealthSnapshotHasCoreFields(request.resource.data);
+        && (
+          (docId == 'current' && wealthSnapshotHasCoreFields(request.resource.data))
+          || (docId == 'zakatCalculator' && zakatCalculatorIsValid(request.resource.data))
+        );
       allow delete: if false;
     }
 

@@ -16,6 +16,8 @@ import {
   deleteFinancialNetworkByDebtId,
 } from '../lib/financialNetworkSync';
 import { mergeMarketingTagsFromTexts } from '../lib/marketingTagsSync';
+import type { DebtRecoveryStatus } from '../contexts/TransactionsContext';
+import { getDebtRecoveryStatus } from '../hooks/useNetDebitData';
 
 /** Primary action: 3D neomorphism + blue neon rim (debt modals footer). */
 const debtModalSaveButtonClass = cn(
@@ -56,6 +58,7 @@ const DebtTracker: React.FC<DebtTrackerProps> = ({ openAddModalSignal = 0 }) => 
     dueDate: new Date().toISOString().split('T')[0],
     phoneNumber: '',
     isBusiness: false,
+    recoveryStatus: 'recoverable' as DebtRecoveryStatus,
   });
   const [isEditSubmitting, setIsEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
@@ -68,6 +71,7 @@ const DebtTracker: React.FC<DebtTrackerProps> = ({ openAddModalSignal = 0 }) => 
     dueDate: new Date().toISOString().split('T')[0],
     phoneNumber: '',
     isBusiness: false,
+    recoveryStatus: 'recoverable' as DebtRecoveryStatus,
   });
 
   const phoneDigitsCount = (raw: string) => String(raw).replace(/\D/g, '').length;
@@ -105,6 +109,7 @@ const DebtTracker: React.FC<DebtTrackerProps> = ({ openAddModalSignal = 0 }) => 
           status: 'unpaid',
           phoneNumber: formData.phoneNumber.trim(),
           isBusiness: formData.isBusiness,
+          recoveryStatus: formData.recoveryStatus,
           createdAt: serverTimestamp(),
         });
       } catch (err) {
@@ -160,6 +165,7 @@ const DebtTracker: React.FC<DebtTrackerProps> = ({ openAddModalSignal = 0 }) => 
         dueDate: new Date().toISOString().split('T')[0],
         phoneNumber: '',
         isBusiness: false,
+        recoveryStatus: 'recoverable',
       });
     } catch (err: any) {
       console.error('Error adding debt:', err);
@@ -292,6 +298,7 @@ const DebtTracker: React.FC<DebtTrackerProps> = ({ openAddModalSignal = 0 }) => 
           : new Date().toISOString().split('T')[0],
       phoneNumber: debt.phoneNumber || '',
       isBusiness: Boolean(debt.isBusiness),
+      recoveryStatus: getDebtRecoveryStatus(debt),
     });
     setEditError(null);
   };
@@ -328,6 +335,7 @@ const DebtTracker: React.FC<DebtTrackerProps> = ({ openAddModalSignal = 0 }) => 
         dueDate: new Date(editFormData.dueDate),
         phoneNumber: editFormData.phoneNumber.trim(),
         isBusiness: editFormData.isBusiness,
+        recoveryStatus: editFormData.recoveryStatus,
       });
 
       try {
@@ -603,6 +611,19 @@ const DebtTracker: React.FC<DebtTrackerProps> = ({ openAddModalSignal = 0 }) => 
               <p className="text-sm text-slate-500 dark:text-slate-400 italic">"{debt.description}"</p>
             )}
 
+            {debt.status === 'unpaid' && (
+              <div
+                className={cn(
+                  'inline-flex max-w-full items-center rounded-xl border px-2.5 py-1.5 text-[10px] font-black uppercase leading-tight tracking-wide sm:text-[11px]',
+                  getDebtRecoveryStatus(debt) === 'recoverable'
+                    ? 'border-amber-400/55 bg-gradient-to-r from-amber-400/25 to-yellow-300/15 text-amber-950 shadow-[0_0_14px_rgba(255,215,0,0.35)] dark:text-amber-100'
+                    : 'border-slate-400/40 bg-slate-800/60 text-slate-200 dark:border-slate-600'
+                )}
+              >
+                {getDebtRecoveryStatus(debt) === 'recoverable' ? t('recoveryRecoverable') : t('recoveryNonRecoverable')}
+              </div>
+            )}
+
             <div className="pt-4 border-t border-slate-50 dark:border-slate-700 flex flex-col gap-4">
               <div className="flex items-center gap-2 text-slate-400 text-sm">
                 <Calendar className="w-4 h-4" />
@@ -698,6 +719,43 @@ const DebtTracker: React.FC<DebtTrackerProps> = ({ openAddModalSignal = 0 }) => 
                     >
                       {t('borrowed')}
                     </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold uppercase tracking-wide text-amber-800 dark:text-amber-200">
+                      {t('recoveryStatusLabel')} *
+                    </p>
+                    <div
+                      className={cn(
+                        'flex gap-1.5 rounded-2xl border border-amber-400/45 bg-gradient-to-br from-indigo-950/90 via-violet-950/85 to-slate-950/95 p-1.5',
+                        'shadow-[inset_0_2px_6px_rgba(0,0,0,0.35),0_0_22px_rgba(255,215,0,0.18),0_4px_0_rgba(30,27,75,0.5)] backdrop-blur-md'
+                      )}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, recoveryStatus: 'recoverable' })}
+                        className={cn(
+                          'flex-1 rounded-xl px-2 py-2.5 text-center text-[11px] font-black leading-tight transition-all sm:text-xs',
+                          formData.recoveryStatus === 'recoverable'
+                            ? 'border border-[#FFD700]/60 bg-gradient-to-b from-amber-400/95 to-amber-600/90 text-amber-950 shadow-[0_0_18px_rgba(255,215,0,0.45),inset_0_1px_0_rgba(255,255,255,0.45)]'
+                            : 'border border-transparent text-indigo-100/80 hover:bg-white/5'
+                        )}
+                      >
+                        {t('recoveryRecoverable')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, recoveryStatus: 'non_recoverable' })}
+                        className={cn(
+                          'flex-1 rounded-xl px-2 py-2.5 text-center text-[11px] font-black leading-tight transition-all sm:text-xs',
+                          formData.recoveryStatus === 'non_recoverable'
+                            ? 'border border-fuchsia-400/50 bg-gradient-to-b from-slate-800 to-slate-950 text-fuchsia-100 shadow-[0_0_16px_rgba(217,70,239,0.35),inset_0_1px_0_rgba(255,255,255,0.08)]'
+                            : 'border border-transparent text-indigo-100/80 hover:bg-white/5'
+                        )}
+                      >
+                        {t('recoveryNonRecoverable')}
+                      </button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-6">
@@ -797,7 +855,7 @@ const DebtTracker: React.FC<DebtTrackerProps> = ({ openAddModalSignal = 0 }) => 
                     {isSubmitting ? (
                       <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
                     ) : (
-                      <Save className="h-5 w-5" />
+                      <DollarSign className="h-5 w-5" />
                     )}
                     {t('save')}
                   </button>
@@ -913,6 +971,43 @@ const DebtTracker: React.FC<DebtTrackerProps> = ({ openAddModalSignal = 0 }) => 
                     ))}
                   </div>
 
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold uppercase tracking-wide text-amber-800 dark:text-amber-200">
+                      {t('recoveryStatusLabel')} *
+                    </p>
+                    <div
+                      className={cn(
+                        'flex gap-1.5 rounded-2xl border border-amber-400/45 bg-gradient-to-br from-indigo-950/90 via-violet-950/85 to-slate-950/95 p-1.5',
+                        'shadow-[inset_0_2px_6px_rgba(0,0,0,0.35),0_0_22px_rgba(255,215,0,0.18),0_4px_0_rgba(30,27,75,0.5)] backdrop-blur-md'
+                      )}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setEditFormData((p) => ({ ...p, recoveryStatus: 'recoverable' }))}
+                        className={cn(
+                          'flex-1 rounded-xl px-2 py-2.5 text-center text-[11px] font-black leading-tight transition-all sm:text-xs',
+                          editFormData.recoveryStatus === 'recoverable'
+                            ? 'border border-[#FFD700]/60 bg-gradient-to-b from-amber-400/95 to-amber-600/90 text-amber-950 shadow-[0_0_18px_rgba(255,215,0,0.45),inset_0_1px_0_rgba(255,255,255,0.45)]'
+                            : 'border border-transparent text-indigo-100/80 hover:bg-white/5'
+                        )}
+                      >
+                        {t('recoveryRecoverable')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditFormData((p) => ({ ...p, recoveryStatus: 'non_recoverable' }))}
+                        className={cn(
+                          'flex-1 rounded-xl px-2 py-2.5 text-center text-[11px] font-black leading-tight transition-all sm:text-xs',
+                          editFormData.recoveryStatus === 'non_recoverable'
+                            ? 'border border-fuchsia-400/50 bg-gradient-to-b from-slate-800 to-slate-950 text-fuchsia-100 shadow-[0_0_16px_rgba(217,70,239,0.35),inset_0_1px_0_rgba(255,255,255,0.08)]'
+                            : 'border border-transparent text-indigo-100/80 hover:bg-white/5'
+                        )}
+                      >
+                        {t('recoveryNonRecoverable')}
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Name + Phone */}
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
                     <div className="space-y-1.5">
@@ -1008,5 +1103,3 @@ const DebtTracker: React.FC<DebtTrackerProps> = ({ openAddModalSignal = 0 }) => 
 };
 
 export default DebtTracker;
-
-function Save(props: any) { return <DollarSign {...props} /> }

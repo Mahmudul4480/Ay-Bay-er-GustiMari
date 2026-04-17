@@ -34,6 +34,7 @@ import type { PieSectorDataItem } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
 import { TrendingUp, TrendingDown, Wallet, CreditCard, AlertTriangle, Trash2, PieChart as PieChartIcon, Edit2, ArrowRight, X, CalendarX } from 'lucide-react';
 import TransactionForm from './TransactionForm';
+import TransactionDrillDownModal from './TransactionDrillDownModal';
 import { Transaction } from '../hooks/useTransactions';
 import { deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
@@ -128,7 +129,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       padding: '12px 16px',
     };
   }, []);
-  const [modalType, setModalType] = React.useState<'income' | 'expense' | null>(null);
+  const [drillDownVariant, setDrillDownVariant] = React.useState<'income' | 'expense' | null>(null);
   const [editingTransaction, setEditingTransaction] = React.useState<Transaction | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = React.useState<string | null>(null);
   const [showBalanceBreakdown, setShowBalanceBreakdown] = React.useState(false);
@@ -467,8 +468,8 @@ const Dashboard: React.FC<DashboardProps> = ({
               }}
               onClick={() => {
                 if (stat.id === 'balance') setShowBalanceBreakdown(true);
-                else if (stat.id === 'income') setModalType('income');
-                else if (stat.id === 'expense') setModalType('expense');
+                else if (stat.id === 'income') setDrillDownVariant('income');
+                else if (stat.id === 'expense') setDrillDownVariant('expense');
                 else if (stat.id === 'netDebt' && onTabChange) onTabChange('debts');
               }}
               className={cn(
@@ -1043,13 +1044,17 @@ const Dashboard: React.FC<DashboardProps> = ({
         )}
       </AnimatePresence>
 
+      <TransactionDrillDownModal
+        open={drillDownVariant !== null}
+        variant={drillDownVariant ?? 'expense'}
+        onClose={() => setDrillDownVariant(null)}
+        monthLabel={monthLabel}
+        monthTransactions={monthTransactions}
+        language={language}
+        t={t}
+      />
+
       <AnimatePresence>
-        {modalType && (
-          <TransactionForm 
-            onClose={() => setModalType(null)} 
-            initialType={modalType} 
-          />
-        )}
         {editingTransaction && (
           <TransactionForm 
             transaction={editingTransaction}
